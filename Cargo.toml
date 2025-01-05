@@ -2,100 +2,44 @@
 name = "time_tracker"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
-description = "A cross-platform time tracking application"
-license = "MIT"
 
 [dependencies]
-# GUI框架
-eframe = "0.24.0"
-egui = "0.24.0"
-egui_extras = "0.24.0"
-
-# 序列化
+eframe = "0.24"  # egui 框架
+egui = "0.24"    # GUI 库
+chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# 日期和时间处理
-chrono = { version = "0.4", features = ["serde"] }
-
-# 数据库
-rusqlite = { version = "0.29", features = ["bundled", "chrono"] }
-
-# 日志
+rusqlite = { version = "0.28", features = ["bundled", "backup", "chrono"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.21"
+notify = "6.1"
 log = "0.4"
 env_logger = "0.10"
-
-# 错误处理
 thiserror = "1.0"
-anyhow = "1.0"
-
-# 异步运行时
 tokio = { version = "1.0", features = ["full"] }
-
-# 音频支持
-rodio = "0.17"
-
-# 文件系统和路径处理
+tray-item = "0.9"
 dirs = "5.0"
-path-clean = "1.0"
-
-# 国际化支持
-fluent = "0.16"
-unic-langid = "0.9"
-
-# 图表绘制
-plotters = "0.3"
-plotters-backend = "0.3"
-
-# CSV处理
-csv = "1.2"
-
-# Base64编码
-base64 = "0.21"
-
-# LRU缓存
 lru = "0.12"
 
-# 通知
-notify-rust = "4.8"
+# 图表绘制
+plotters = { version = "0.3", features = ["bitmap_backend", "line_series"] }
+plotters-backend = "0.3"
 
 # 文件对话框
-rfd = "0.11"
+rfd = "0.12"
 
-# Windows特定依赖
-[target.'cfg(target_os = "windows")'.dependencies]
+[target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
     "winuser",
-    "processthreadsapi",
-    "winbase",
-    "handleapi",
-    "errhandlingapi",
-    "winerror",
+    "windef",
+    "minwindef",
     "shellapi",
-    "commctrl",
-    "wincon",
-    "fileapi",
-    "winreg",
-] }
-
-# Windows注册表
-[target.'cfg(windows)'.dependencies]
-winreg = "0.11"
-
-# macOS特定依赖
-[target.'cfg(target_os = "macos")'.dependencies]
-objc = "0.2"
-cocoa = "0.24"
-core-foundation = "0.9"
-
-# 添加更多必要的依赖
-parking_lot = "0.12" # 替代std::sync::Mutex
-notify = "6.1" # 文件系统监控
-tracing = { version = "0.1", optional = true } # 更好的日志支持
+    "winbase",
+    "errhandlingapi",
+]}
+winreg = "0.50"
+winres = "0.1"
 
 [dev-dependencies]
-tempfile = "3.8"
 test-log = "0.2"
-pretty_assertions = "1.4"
-mockall = "0.12" # 用于mock测试
+tempfile = "3.8"

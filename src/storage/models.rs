@@ -3,6 +3,7 @@
 use chrono::{DateTime, Local};
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
+use egui::Color32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppUsageRecord {
@@ -26,7 +27,7 @@ pub struct PomodoroRecord {
     pub project_id: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PomodoroStatus {
     Completed,
     Interrupted,
@@ -125,13 +126,25 @@ impl Project {
 }
 
 impl Tag {
-    pub fn new(name: String, color: Option<String>) -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             id: None,
-            name,
-            color,
+            name: name.into(),
+            color: None,
             created_at: Local::now(),
         }
+    }
+
+    pub fn with_color<S: Into<String>>(mut self, color: S) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+
+    pub fn show(&self, ui: &mut egui::Ui) {
+        let color = self.color.as_ref()
+            .and_then(|hex| Color32::from_rgb_hex(hex).ok())
+            .unwrap_or(Color32::WHITE);
+        ui.colored_label(color, &self.name);
     }
 }
 
@@ -300,6 +313,26 @@ pub struct ProductivityStats {
     pub productivity_ratio: f64,
     pub most_productive_hour: Option<u32>,
     pub most_productive_day: Option<u32>,
+}
+
+// 添加颜色转换辅助函数
+trait ColorExt {
+    fn from_rgb_hex(hex: &str) -> Result<Color32, &'static str>;
+}
+
+impl ColorExt for Color32 {
+    fn from_rgb_hex(hex: &str) -> Result<Color32, &'static str> {
+        let hex = hex.trim_start_matches('#');
+        if hex.len() != 6 {
+            return Err("Invalid hex color length");
+        }
+        
+        let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| "Invalid red component")?;
+        let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| "Invalid green component")?;
+        let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid blue component")?;
+        
+        Ok(Color32::from_rgb(r, g, b))
+    }
 }
 
 #[cfg(test)]

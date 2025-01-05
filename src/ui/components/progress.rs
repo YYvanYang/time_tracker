@@ -1,5 +1,5 @@
-use eframe::egui;
-use super::styles;
+use eframe::egui::{self, FontId, TextStyle};
+use crate::ui::styles;
 
 pub struct ProgressBar {
     progress: f32,
@@ -25,6 +25,11 @@ impl ProgressBar {
 
     pub fn with_color(mut self, color: egui::Color32) -> Self {
         self.color = color;
+        self
+    }
+
+    pub fn with_height(mut self, height: f32) -> Self {
+        self.height = height;
         self
     }
 
@@ -57,10 +62,10 @@ impl ProgressBar {
 
             // 显示百分比
             if self.show_percentage {
-                let text = format!("{}%", (self.progress * 100.0).round() as i32);
+                let text = format!("{:.1}%", self.progress * 100.0);
                 let galley = ui.painter().layout_no_wrap(
                     text,
-                    styles::small().into(),
+                    FontId::proportional(10.0),
                     self.color,
                 );
                 let text_pos = egui::pos2(

@@ -3,38 +3,17 @@
 use crate::error::Result;
 use crate::ui::{styles, components::*};
 use crate::ui::TimeTrackerApp;
+use crate::storage::{PomodoroStatus, Tag};
 use eframe::egui;
-use chrono::{Local, NaiveDateTime, Timelike, Datelike};
+use chrono::{Local, NaiveDateTime, Timelike};
 use std::time::Duration;
-use crate::storage::PomodoroStatus;
 use crate::pomodoro::PomodoroStats as CorePomodoroStats;
 
 pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
-    ui.spacing_mut().item_spacing = egui::vec2(styles::SPACING_LARGE, styles::SPACING_LARGE);
-
-    ui.horizontal(|ui| {
-        // 主番茄钟区域
-        ui.vertical(|ui| {
-            render_pomodoro_timer(app, ui);
-            ui.add_space(styles::SPACING_MEDIUM);
-            render_pomodoro_controls(app, ui);
-        });
-
-        ui.separator();
-
-        // 右侧统计区域
-        ui.vertical(|ui| {
-            render_pomodoro_stats(app, ui);
-        });
-    });
-}
-
-fn render_pomodoro_timer(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     Card::new()
         .with_style(styles::CardStyle::elevated())
         .show(ui, |ui| {
-            // 番茄钟状态显示
-            let (status_text, color) = match app.pomodoro.get_state() {
+            let (status_text, color) = match app.pomodoro_timer.lock().unwrap().get_state() {
                 crate::pomodoro::PomodoroState::Working => (
                     "专注工作中",
                     styles::COLOR_PRIMARY,
@@ -62,7 +41,7 @@ fn render_pomodoro_timer(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                 ui.add_space(styles::SPACING_SMALL);
 
                 // 显示剩余时间
-                let remaining = app.pomodoro.get_remaining_time();
+                let remaining = app.pomodoro_timer.lock().unwrap().get_remaining_time();
                 ui.heading(
                     styles::format_text(
                         &format!("{:02}:{:02}", 
@@ -75,7 +54,7 @@ fn render_pomodoro_timer(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                 );
 
                 // 显示进度条
-                let progress = app.pomodoro.get_progress();
+                let progress = app.pomodoro_timer.lock().unwrap().get_progress();
                 ui.add_space(styles::SPACING_SMALL);
                 ProgressBar::new(progress)
                     .with_color(color)
@@ -83,28 +62,31 @@ fn render_pomodoro_timer(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                     .show(ui);
             });
 
-            // 显示当前标签或项目（如果有）
+            // 显示当前标签或项目
             if let Some(project) = app.get_current_project() {
                 ui.add_space(styles::SPACING_SMALL);
                 ui.horizontal(|ui| {
                     ui.label("当前项目：");
                     Tag::new(&project.name)
-                        .with_color(project.color)
+                        .with_color(project.color.as_ref().map_or_else(
+                            || "#FFFFFF".to_string(),
+                            |c| c.clone()
+                        ))
                         .show(ui);
                 });
             }
         });
 }
 
-fn render_pomodoro_controls(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
+pub fn render_pomodoro_controls(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        match app.pomodoro.get_state() {
+        match app.pomodoro_timer.lock().unwrap().get_state() {
             crate::pomodoro::PomodoroState::Idle => {
                 if Button::new("开始专注")
                     .show(ui)
                     .clicked()
                 {
-                    app.pomodoro.start().ok();
+                    app.pomodoro_timer.lock().unwrap().start().ok();
                 }
             }
             crate::pomodoro::PomodoroState::Working |
@@ -115,14 +97,14 @@ fn render_pomodoro_controls(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                     .show(ui)
                     .clicked()
                 {
-                    app.pomodoro.pause().ok();
+                    app.pomodoro_timer.lock().unwrap().pause().ok();
                 }
                 if Button::new("停止")
                     .with_style(styles::ButtonStyle::danger())
                     .show(ui)
                     .clicked()
                 {
-                    app.pomodoro.stop().ok();
+                    app.pomodoro_timer.lock().unwrap().stop().ok();
                 }
             }
             crate::pomodoro::PomodoroState::Paused(_) => {
@@ -130,31 +112,27 @@ fn render_pomodoro_controls(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                     .show(ui)
                     .clicked()
                 {
-                    app.pomodoro.start().ok();
+                    app.pomodoro_timer.lock().unwrap().start().ok();
                 }
                 if Button::new("停止")
                     .with_style(styles::ButtonStyle::danger())
                     .show(ui)
                     .clicked()
                 {
-                    app.pomodoro.stop().ok();
+                    app.pomodoro_timer.lock().unwrap().stop().ok();
                 }
             }
         }
     });
 
     // 添加笔记
-    if app.pomodoro.get_state() != crate::pomodoro::PomodoroState::Idle {
-        ui.add_space(styles::SPACING_SMALL);
-        ui.label("添加笔记：");
-        if let Some(note) = &mut app.current_note {
-            ui.text_edit_multiline(note);
-        }
+    if let Some(note) = &mut app.ui_state.current_note {
+        ui.text_edit_multiline(note);
     }
 }
 
 fn render_pomodoro_stats(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
-    if let Ok(stats) = app.pomodoro.get_stats() {
+    if let Ok(stats) = app.pomodoro_timer.lock().unwrap().get_stats() {
         Card::new()
             .with_style(styles::CardStyle::elevated())
             .show(ui, |ui| {
@@ -244,9 +222,10 @@ struct PomodoroStats {
     records: Vec<PomodoroRecord>,
 }
 
+#[derive(Debug)]
 struct PomodoroRecord {
     end_time: NaiveDateTime,
-    status: crate::pomodoro::PomodoroStatus,
+    status: PomodoroStatus,
     project: Option<String>,
     tags: Vec<String>,
     notes: Option<String>,

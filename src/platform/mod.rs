@@ -9,23 +9,24 @@ pub struct WindowInfo {
     pub window_title: String,
 }
 
-pub trait PlatformOperations {
+pub trait PlatformOperations: Send {
     fn get_active_window(&self) -> Result<WindowInfo>;
     fn set_autostart(&self, enabled: bool) -> Result<()>;
     fn is_autostart_enabled(&self) -> Result<bool>;
 }
 
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+pub use self::windows::WindowsPlatform;
+
 pub fn init() -> Result<impl PlatformOperations> {
     #[cfg(target_os = "windows")]
     {
-        Ok(windows::WindowsPlatform::new()?)
+        Ok(WindowsPlatform::new()?)
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     {
-        Ok(macos::MacOSPlatform::new()?)
-    }
-    #[cfg(target_os = "linux")]
-    {
-        Ok(linux::LinuxPlatform::new()?)
+        Err(TimeTrackerError::Platform("Platform not supported".into()))
     }
 } 

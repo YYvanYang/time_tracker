@@ -11,8 +11,8 @@ pub struct TimeAnalysis {
 }
 
 pub fn analyze_time_usage(
-    start_date: DateTime<Local>,
-    end_date: DateTime<Local>,
+    _start_date: DateTime<Local>,
+    _end_date: DateTime<Local>,
 ) -> Result<TimeAnalysis> {
     // 分析实现
     Ok(TimeAnalysis {

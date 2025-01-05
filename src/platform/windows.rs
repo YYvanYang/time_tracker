@@ -1,35 +1,34 @@
-use crate::error::{Result, TimeTrackerError};
+use crate::error::Result;
+use crate::platform::{PlatformOperations, WindowInfo};
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
 use winapi::um::winuser;
-use winapi::um::shellapi::Shell_NotifyIconA;
-use std::ptr;
+use winapi::shared::windef;
+use winreg::enums::*;
 
 pub struct WindowsPlatform {
     // Windows 平台特定字段
 }
 
-impl PlatformInterface for WindowsPlatform {
-    fn init() -> Result<Self> {
-        // 初始化 Windows 平台特定功能
+impl WindowsPlatform {
+    pub fn new() -> Result<Self> {
         Ok(Self {})
     }
+}
 
-    fn show_notification(&self, title: &str, message: &str) -> Result<()> {
-        // 使用 Windows API 显示通知
-        unsafe {
-            // ... Windows 特定实现 ...
-        }
-        Ok(())
+impl PlatformOperations for WindowsPlatform {
+    fn get_active_window(&self) -> Result<WindowInfo> {
+        // 实现获取活动窗口
+        todo!()
     }
 
-    fn set_autostart(&self, enabled: bool) -> Result<()> {
-        // 使用 Windows 注册表设置自启动
-        // ... Windows 特定实现 ...
+    fn set_autostart(&self, _enabled: bool) -> Result<()> {
+        // TODO: 实现 Windows 自启动设置
         Ok(())
     }
 
     fn is_autostart_enabled(&self) -> Result<bool> {
-        // 检查 Windows 注册表中的自启动设置
-        // ... Windows 特定实现 ...
-        Ok(false)
+        // 实现检查自启动状态
+        todo!()
     }
 } 

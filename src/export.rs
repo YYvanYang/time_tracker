@@ -20,7 +20,7 @@ pub struct ExportData {
     pub daily_summaries: Vec<DailySummary>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     CSV,
     JSON,
@@ -555,110 +555,3 @@ mod tests {
         Ok(())
     }
 }
-start_time.format("%Y-%m-%d").to_string();
-                let entry = daily_stats.entry(date)
-                    .or_insert((0, 0, 0.0));
-                
-                match record.status {
-                    PomodoroStatus::Completed => {
-                        entry.0 += 1;
-                        entry.2 += record.duration().as_secs_f64() / 3600.0;
-                    }
-                    PomodoroStatus::Interrupted => {
-                        entry.1 += 1;
-                    }
-                }
-            }
-
-            let mut row = 2;
-            for (date, (completed, interrupted, hours)) in daily_stats {
-                worksheet.write_string(row, 0, &date)?;
-                worksheet.write_number(row, 1, completed as f64)?;
-                worksheet.write_number(row, 2, interrupted as f64)?;
-                worksheet.write_number(row, 3, hours)?;
-                row += 1;
-            }
-
-            // 添加完成情况折线图
-            let mut chart = Chart::new(ChartType::Line);
-            chart.add_series()
-                .set_name("完成数")
-                .set_categories(("Sheet2", 2, 0, row - 1, 0))
-                .set_values(("Sheet2", 2, 1, row - 1, 1));
-            chart.add_series()
-                .set_name("中断数")
-                .set_categories(("Sheet2", 2, 0, row - 1, 0))
-                .set_values(("Sheet2", 2, 2, row - 1, 2));
-            worksheet.insert_chart(1, 5, &chart)?;
-        }
-
-        workbook.save(path)?;
-        Ok(())
-    }
-
-    fn export_html<P: AsRef<Path>>(&self, data: ExportData, path: P) -> Result<()> {
-        let mut html = String::new();
-        html.push_str("<!DOCTYPE html>\n<html>\n<head>\n");
-        html.push_str("<meta charset=\"utf-8\">\n");
-        html.push_str("<title>时间追踪报告</title>\n");
-        html.push_str(include_str!("../assets/templates/export_style.css"));
-        html.push_str("</head>\n<body>\n");
-
-        // 添加概览
-        html.push_str("<h1>时间追踪报告</h1>\n");
-        html.push_str(&format!(
-            "<p>导出时间: {}</p>\n",
-            data.export_date.format("%Y-%m-%d %H:%M:%S")
-        ));
-        html.push_str(&format!(
-            "<p>时间范围: {} 至 {}</p>\n",
-            self.start_date.format("%Y-%m-%d"),
-            self.end_date.format("%Y-%m-%d")
-        ));
-
-        // 应用使用统计
-        if self.include_app_usage {
-            html.push_str("<section>\n");
-            html.push_str("<h2>应用使用统计</h2>\n");
-            html.push_str("<table>\n");
-            html.push_str("<tr><th>应用</th><th>使用时长</th><th>使用次数</th><th>生产力</th></tr>\n");
-
-            let mut app_stats: HashMap<String, (Duration, u32, u32)> = HashMap::new();
-            for record in &data.app_usage {
-                let entry = app_stats.entry(record.app_name.clone())
-                    .or_insert((Duration::from_secs(0), 0, 0));
-                entry.0 += record.duration;
-                entry.1 += 1;
-                if record.is_productive {
-                    entry.2 += 1;
-                }
-            }
-
-            for (app, (duration, count, productive)) in app_stats {
-                html.push_str(&format!(
-                    "<tr><td>{}</td><td>{:.1}小时</td><td>{}</td><td>{:.1}%</td></tr>\n",
-                    app,
-                    duration.as_secs_f64() / 3600.0,
-                    count,
-                    productive as f64 / count as f64 * 100.0
-                ));
-            }
-
-            html.push_str("</table>\n</section>\n");
-        }
-
-        // 番茄钟统计
-        if self.include_pomodoros {
-            html.push_str("<section>\n");
-            html.push_str("<h2>番茄钟统计</h2>\n");
-            html.push_str("<table>\n");
-            html.push_str(
-                "<tr><th>日期</th><th>完成数</th><th>中断数</th><th>专注时长</th><th>项目</th></tr>\n"
-            );
-
-            let mut daily_stats: HashMap<String, (u32, u32, Duration, HashSet<String>)> = HashMap::new();
-            for record in &data.pomodoros {
-                let date = record.//src/export.rs
-
-use crate::error::{Result, TimeTrackerError};
-use crate::storage::models

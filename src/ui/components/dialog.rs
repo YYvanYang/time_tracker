@@ -2,22 +2,26 @@
 
 use super::Button;
 use crate::error::Result;
-use crate::ui::{styles, TimeTrackerApp};
+use crate::ui::{styles, TimeTrackerApp, DialogHandler, DialogContext};
 use eframe::egui;
+use crate::error::TimeTrackerError;
+use rfd::FileDialog;
 
 // 基础对话框特征
 pub trait Dialog {
     fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool;
+    fn validate(&self) -> Result<()> {
+        Ok(())  // 默认实现
+    }
 }
 
 // 项目对话框
-#[derive(Debug)]
 pub struct ProjectDialog {
     pub title: String,
     pub name: String,
     pub description: String,
     pub color: egui::Color32,
-    pub on_save: Option<Box<dyn FnOnce(&mut TimeTrackerApp, String, String, egui::Color32) -> Result<()>>>,
+    pub on_save: Option<Box<dyn FnOnce(&mut TimeTrackerApp, String, String, egui::Color32) -> Result<()> + Send>>,
 }
 
 impl ProjectDialog {
@@ -94,12 +98,23 @@ impl Dialog for ProjectDialog {
     }
 }
 
+impl std::fmt::Debug for ProjectDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectDialog")
+            .field("title", &self.title)
+            .field("name", &self.name)
+            .field("description", &self.description)
+            .field("color", &self.color)
+            .field("on_save", &format_args!("<callback>"))
+            .finish()
+    }
+}
+
 // 标签对话框
-#[derive(Debug)]
 pub struct TagDialog {
     pub name: String,
     pub color: egui::Color32,
-    pub on_save: Option<Box<dyn FnOnce(&mut TimeTrackerApp, String, egui::Color32) -> Result<()>>>,
+    pub on_save: Option<Box<dyn FnOnce(&mut TimeTrackerApp, String, egui::Color32) -> Result<()> + Send>>,
 }
 
 impl TagDialog {
@@ -112,13 +127,20 @@ impl TagDialog {
     }
 }
 
+impl std::fmt::Debug for TagDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TagDialog")
+            .field("name", &self.name)
+            .field("color", &self.color)
+            .field("on_save", &format_args!("<callback>"))
+            .finish()
+    }
+}
+
 impl Dialog for TagDialog {
     fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
         let mut is_open = true;
         egui::Window::new("添加标签")
-            .collapsible(false)
-            .resizable(false)
-            .default_width(300.0)
             .open(&mut is_open)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(styles::SPACING_MEDIUM, styles::SPACING_MEDIUM);
@@ -168,7 +190,6 @@ impl Dialog for TagDialog {
 }
 
 // 导出对话框
-#[derive(Debug)]
 pub struct ExportDialog {
     pub format: ExportFormat,
     pub path: String,
@@ -178,7 +199,7 @@ pub struct ExportDialog {
     pub include_statistics: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExportFormat {
     CSV,
     JSON,
@@ -233,8 +254,8 @@ impl Dialog for ExportDialog {
                         .show(ui)
                         .clicked()
                     {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("选择导出路径")
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("JSON", &["json"])
                             .save_file()
                         {
                             self.path = path.display().to_string();
@@ -309,8 +330,20 @@ impl ExportDialog {
     }
 }
 
+impl std::fmt::Debug for ExportDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExportDialog")
+            .field("format", &self.format)
+            .field("path", &self.path)
+            .field("date_range", &self.date_range)
+            .field("include_app_usage", &self.include_app_usage)
+            .field("include_pomodoros", &self.include_pomodoros)
+            .field("include_statistics", &self.include_statistics)
+            .finish()
+    }
+}
+
 // 设置对话框
-#[derive(Debug)]
 pub struct SettingsDialog {
     pub general_settings: GeneralSettings,
     pub pomodoro_settings: PomodoroSettings,
@@ -347,7 +380,7 @@ pub struct NotificationSettings {
 pub struct BackupSettings {
     pub enabled: bool,
     pub interval: u32,
-    pub keep_data_days: u32,
+    pub max_backup_count: u32,
     pub backup_path: String,
 }
 
@@ -376,7 +409,7 @@ impl SettingsDialog {
             backup_settings: BackupSettings {
                 enabled: config.storage.backup_enabled,
                 interval: config.storage.backup_interval.as_secs() as u32 / 3600,
-                keep_data_days: config.storage.keep_data_days,
+                max_backup_count: config.storage.max_backup_count,
                 backup_path: config.storage.data_dir.to_string_lossy().into_owned(),
             },
         }
@@ -514,7 +547,7 @@ impl SettingsDialog {
 
             ui.horizontal(|ui| {
                 ui.label("保留数据天数");
-                ui.add(egui::DragValue::new(&mut self.backup_settings.keep_data_days)
+                ui.add(egui::DragValue::new(&mut self.backup_settings.max_backup_count)
                     .clamp_range(1..=365));
             });
 
@@ -526,7 +559,7 @@ impl SettingsDialog {
                     .show(ui)
                     .clicked()
                 {
-                    if let Some(path) = rfd::FileDialog::new()
+                    if let Some(path) = FileDialog::new()
                         .set_title("选择备份路径")
                         .pick_folder()
                     {
@@ -542,23 +575,39 @@ impl SettingsDialog {
     }
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for SettingsDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SettingsDialog")
+            .field("general_settings", &self.general_settings)
+            .field("pomodoro_settings", &self.pomodoro_settings)
+            .field("notification_settings", &self.notification_settings)
+            .field("backup_settings", &self.backup_settings)
+            .finish()
+    }
+}
+
 pub struct ConfirmationDialog {
     pub title: String,
     pub message: String,
-    pub on_confirm: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()>>>,
-    pub on_cancel: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()>>>,
+    pub on_confirm: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()> + Send>>,
+    pub on_cancel: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()> + Send>>,
 }
 
 impl Dialog for ConfirmationDialog {
     fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
-        let mut open = true;
+        if let Err(e) = self.validate() {
+            app.show_error(e.to_string());
+            return false;
+        }
+        let mut is_open = true;
         let mut should_close = false;
         
+        if !is_open {
+            return false;
+        }
+        
         egui::Window::new(&self.title)
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
+            .open(&mut is_open)
             .show(ctx, |ui| {
                 ui.label(&self.message);
                 ui.horizontal(|ui| {
@@ -580,11 +629,115 @@ impl Dialog for ConfirmationDialog {
                     }
                 });
             });
+            
+        if should_close {
+            is_open = false;
+        }
+        
+        is_open
+    }
+    
+    fn validate(&self) -> Result<()> {
+        if self.title.is_empty() {
+            return Err(TimeTrackerError::Dialog("Empty title".into()));
+        }
+        if self.message.is_empty() {
+            return Err(TimeTrackerError::Dialog("Empty message".into()));
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for ConfirmationDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfirmationDialog")
+            .field("title", &self.title)
+            .field("message", &self.message)
+            .field("on_confirm", &format_args!("<callback>"))
+            .field("on_cancel", &format_args!("<callback>"))
+            .finish()
+    }
+}
+
+impl DialogHandler for ConfirmationDialog {
+    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        if let Err(e) = self.validate() {
+            // TODO: 添加错误处理
+            return false;
+        }
+        
+        let mut is_open = true;
+        let mut should_close = false;
+        
+        egui::Window::new(&self.title)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label(&self.message);
+                ui.horizontal(|ui| {
+                    if ui.button("确认").clicked() {
+                        if let Some(on_confirm) = self.on_confirm.take() {
+                            // TODO: 使用 dialog_ctx 而不是 app
+                            should_close = true;
+                        }
+                    }
+                    if ui.button("取消").clicked() {
+                        if let Some(on_cancel) = self.on_cancel.take() {
+                            // TODO: 使用 dialog_ctx 而不是 app
+                            should_close = true;
+                        }
+                    }
+                });
+            });
+            
+        if should_close {
+            is_open = false;
+        }
+        
+        is_open
+    }
+}
+
+impl DialogHandler for ExportDialog {
+    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        let mut is_open = true;
+        let mut should_close = false;
+
+        egui::Window::new("导出数据")
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                // 实现导出对话框的显示逻辑
+                if ui.button("导出").clicked() {
+                    // 处理导出逻辑
+                    should_close = true;
+                }
+            });
 
         if should_close {
-            open = false;
+            is_open = false;
         }
-        open
+        is_open
+    }
+}
+
+impl DialogHandler for SettingsDialog {
+    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        let mut is_open = true;
+        let mut should_close = false;
+
+        egui::Window::new("设置")
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                // 实现设置对话框的显示逻辑
+                if ui.button("保存").clicked() {
+                    // 处理保存逻辑
+                    should_close = true;
+                }
+            });
+
+        if should_close {
+            is_open = false;
+        }
+        is_open
     }
 }
 

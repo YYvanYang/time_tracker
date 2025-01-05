@@ -1,5 +1,5 @@
 use eframe::egui;
-use super::styles;
+use crate::ui::styles;
 
 pub struct Chart {
     data: Vec<(f64, f64)>,
@@ -79,18 +79,6 @@ impl Chart {
             rect,
         );
 
-        // 绘制点
-        if self.show_points {
-            for (x, y) in self.data.iter() {
-                let center = to_screen * egui::pos2(*x as f32, *y as f32);
-                shapes.push(egui::Shape::circle_filled(
-                    center,
-                    4.0,
-                    self.color,
-                ));
-            }
-        }
-
         // 绘制线
         if self.show_lines && self.data.len() >= 2 {
             for points in self.data.windows(2) {
@@ -98,7 +86,19 @@ impl Chart {
                 let end = to_screen * egui::pos2(points[1].0 as f32, points[1].1 as f32);
                 shapes.push(egui::Shape::line_segment(
                     [start, end],
-                    (self.stroke_width, self.color).into(),
+                    egui::Stroke::new(self.stroke_width, self.color),
+                ));
+            }
+        }
+
+        // 绘制点
+        if self.show_points {
+            for (x, y) in &self.data {
+                let center = to_screen * egui::pos2(*x as f32, *y as f32);
+                shapes.push(egui::Shape::circle_filled(
+                    center,
+                    4.0,
+                    self.color,
                 ));
             }
         }

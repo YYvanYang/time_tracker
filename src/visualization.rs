@@ -1,5 +1,5 @@
-use crate::error::Result;
 use plotters::prelude::*;
+use crate::error::Result;
 
 pub struct ChartBuilder {
     width: u32,
@@ -18,24 +18,30 @@ impl ChartBuilder {
         }
     }
 
-    pub fn with_size(mut self, width: u32, height: u32) -> Self {
-        self.width = width;
-        self.height = height;
-        self
-    }
-
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = title.into();
-        self
-    }
-
-    pub fn with_data(mut self, data: Vec<(f64, f64)>) -> Self {
-        self.data = data;
-        self
-    }
-
     pub fn build(&self) -> Result<Vec<u8>> {
-        // 图表生成实现
-        Ok(Vec::new())
+        let mut buffer = Vec::new();
+        {
+            let root = BitMapBackend::with_buffer(&mut buffer, (self.width, self.height))
+                .into_drawing_area();
+            root.fill(&WHITE)?;
+
+            let mut chart = plotters::chart::ChartBuilder::on(&root)
+                .caption(&self.title, ("sans-serif", 20))
+                .margin(10)
+                .x_label_area_size(30)
+                .y_label_area_size(30)
+                .build_cartesian_2d(
+                    0f64..24f64,
+                    0f64..self.data.iter().map(|(_, y)| *y).fold(0./0., f64::max),
+                )?;
+
+            chart.configure_mesh().draw()?;
+
+            chart.draw_series(LineSeries::new(
+                self.data.clone(),
+                &BLUE,
+            ))?;
+        }
+        Ok(buffer)
     }
-} 
+}

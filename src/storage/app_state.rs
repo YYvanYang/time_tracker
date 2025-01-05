@@ -1,46 +1,49 @@
 // src/storage/app_state.rs
 
 use crate::error::Result;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppState {
+    pub current_project: Option<String>,
+    pub current_tags: Vec<String>,
     pub window_position: Option<(i32, i32)>,
     pub window_size: Option<(u32, u32)>,
-    pub last_view: String,
 }
 
 pub struct AppStateManager {
-    state: AppState,
+    state: Arc<Mutex<AppState>>,
     file_path: PathBuf,
     auto_save: bool,
 }
 
 impl AppStateManager {
-    pub fn new(data_dir: PathBuf, auto_save: bool) -> Result<Self> {
-        let file_path = data_dir.join("app_state.json");
-        let state = if file_path.exists() {
-            let contents = std::fs::read_to_string(&file_path)?;
-            serde_json::from_str(&contents)?
-        } else {
-            AppState {
-                window_position: None,
-                window_size: None,
-                last_view: "overview".to_string(),
-            }
+    pub fn new(_data_dir: PathBuf, _auto_save: bool) -> Result<Self> {
+        let state = AppState {
+            current_project: None,
+            current_tags: Vec::new(),
+            window_position: None,
+            window_size: None,
         };
 
         Ok(Self {
-            state,
-            file_path,
-            auto_save,
+            state: Arc::new(Mutex::new(state)),
+            file_path: _data_dir.join("app_state.json"),
+            auto_save: _auto_save,
         })
     }
 
-    pub fn save(&self) -> Result<()> {
-        let contents = serde_json::to_string_pretty(&self.state)?;
-        std::fs::write(&self.file_path, contents)?;
+    pub fn save_state(&mut self) -> Result<()> {
+        let state = self.state.lock().unwrap();
+        // TODO: 实现保存状态的逻辑
         Ok(())
+    }
+
+    pub fn get_state(&self) -> Result<std::sync::MutexGuard<AppState>> {
+        self.state.lock().map_err(|e| {
+            TimeTrackerError::State(format!("Failed to lock app state: {}", e))
+        })
     }
 }

@@ -1,17 +1,18 @@
 use crate::error::{Result, TimeTrackerError};
-use crate::platform::PlatformOperations;
-use chrono::{DateTime, Duration, Local};
+use crate::platform::{PlatformOperations, WindowInfo as PlatformWindowInfo};
+use crate::storage::AppUsageRecord;
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppUsageData {
     pub app_name: String,
     pub window_title: String,
     pub start_time: DateTime<Local>,
-    pub duration: std::time::Duration,
+    pub duration: Duration,
     pub is_productive: bool,
     pub category: AppCategory,
 }
@@ -29,8 +30,8 @@ pub enum AppCategory {
 pub struct AppUsageConfig {
     pub productive_apps: Vec<String>,
     pub unproductive_apps: Vec<String>,
-    pub tracking_interval: std::time::Duration,
-    pub idle_threshold: std::time::Duration,
+    pub tracking_interval: Duration,
+    pub idle_threshold: Duration,
     pub category_rules: HashMap<String, AppCategory>,
 }
 
@@ -57,8 +58,8 @@ impl Default for AppUsageConfig {
                 "game".to_string(),
                 "youtube".to_string(),
             ],
-            tracking_interval: std::time::Duration::from_secs(30),
-            idle_threshold: std::time::Duration::from_secs(300),
+            tracking_interval: Duration::from_secs(30),
+            idle_threshold: Duration::from_secs(300),
             category_rules,
         }
     }
@@ -66,42 +67,44 @@ impl Default for AppUsageConfig {
 
 pub struct AppTracker {
     config: AppUsageConfig,
-    current_app: Option<AppUsageData>,
-    last_check: Instant,
+    current_app: Arc<Mutex<Option<AppUsageData>>>,
+    last_check: Arc<Mutex<Instant>>,
     storage: Arc<Mutex<Vec<AppUsageData>>>,
-    last_active: Instant,
-    platform: Option<Box<dyn PlatformOperations>>,
+    last_active: Arc<Mutex<Instant>>,
+    platform: Arc<Mutex<Option<Box<dyn PlatformOperations + Send>>>>,
 }
 
 impl AppTracker {
-    pub fn new(config: AppUsageConfig) -> Self {
-        Self {
+    pub fn new(config: AppUsageConfig) -> Result<Self> {
+        let platform = crate::platform::init()?;
+        Ok(Self {
             config,
-            current_app: None,
-            last_check: Instant::now(),
+            current_app: Arc::new(Mutex::new(None)),
+            last_check: Arc::new(Mutex::new(Instant::now())),
             storage: Arc::new(Mutex::new(Vec::new())),
-            last_active: Instant::now(),
-            platform: None,
-        }
+            last_active: Arc::new(Mutex::new(Instant::now())),
+            platform: Arc::new(Mutex::new(Some(Box::new(platform)))),
+        })
     }
 
     pub fn update(&mut self) -> Result<()> {
         let now = Instant::now();
-        if now.duration_since(self.last_check) < self.config.tracking_interval {
-            return Ok(());
-        }
+        
+        let window_info = {
+            let platform_guard = self.platform.lock()?;
+            platform_guard.as_ref()
+                .ok_or_else(|| TimeTrackerError::Platform("Platform not initialized".into()))?
+                .get_active_window()?
+        };
 
-        if let Some(platform) = &self.platform {
-            if let Ok(window_info) = platform.get_active_window() {
-                self.switch_to_new_app(window_info)?;
-            }
-        }
+        self.switch_to_new_app(window_info)?;
 
+        *self.last_check.lock()? = now;
         Ok(())
     }
 
     fn handle_idle_period(&mut self) -> Result<()> {
-        if let Some(current_app) = self.current_app.take() {
+        if let Some(current_app) = self.current_app.lock()?.take() {
             // 保存当前应用使用记录
             self.storage.lock()
                 .map_err(|_| TimeTrackerError::Platform("Failed to lock storage".into()))?
@@ -111,36 +114,36 @@ impl AppTracker {
     }
 
     fn update_current_app_duration(&mut self) -> Result<()> {
-        if let Some(app) = &mut self.current_app {
-            let elapsed = self.last_check.elapsed();
+        if let Some(app) = self.current_app.lock()?.as_mut() {
+            let elapsed = self.last_check.lock()?.elapsed();
             app.duration += elapsed;
         }
         Ok(())
     }
 
-    fn switch_to_new_app(&mut self, mut window_info: crate::platform::WindowInfo) -> Result<()> {
-        // 保存之前的应用记录
-        if let Some(current_app) = self.current_app.take() {
-            self.storage.lock()
-                .map_err(|_| TimeTrackerError::Platform("Failed to lock storage".into()))?
-                .push(current_app);
+    pub fn switch_to_new_app(&mut self, window_info: PlatformWindowInfo) -> Result<()> {
+        let app_name = window_info.app_name.clone();
+        
+        let app_info = AppUsageData {
+            app_name: window_info.app_name,
+            window_title: window_info.window_title,
+            start_time: chrono::Local::now(),
+            duration: Duration::default(),
+            is_productive: self.is_productive(&app_name),
+            category: self.get_app_category(&app_name),
+        };
+
+        // 获取并更新当前应用
+        let mut current_app = self.current_app.lock()?;
+        if let Some(app) = current_app.as_mut() {
+            // 更新结束时间和持续时间
+            app.duration = self.last_check.lock()?.elapsed();
+            // 保存当前应用记录
+            self.storage.lock()?.push(app.clone());
         }
 
-        let app_name = window_info.app_name.clone();
-        let is_productive = self.is_productive(&app_name);
-        let category = self.get_app_category(&app_name);
-
-        // 创建新的应用记录
-        self.current_app = Some(AppUsageData {
-            app_name,
-            window_title: window_info.window_title,
-            start_time: Local::now(),
-            duration: std::time::Duration::from_secs(0),
-            is_productive,
-            category,
-        });
-
-        self.last_active = Instant::now();
+        // 设置新的当前应用
+        *current_app = Some(app_info);
         Ok(())
     }
 
@@ -162,13 +165,40 @@ impl AppTracker {
         AppCategory::Other
     }
 
-    pub fn get_usage_stats(&self, start_time: DateTime<Local>) -> Result<AppUsageStats> {
-        let storage = self.storage.lock()
-            .map_err(|_| TimeTrackerError::Platform("Failed to lock storage".into()))?;
+    pub fn get_usage_stats(&self, since: DateTime<Local>) -> Result<AppUsageStats> {
+        let mut stats = AppUsageStats {
+            total_time: Duration::from_secs(0),
+            productive_time: Duration::from_secs(0),
+            unproductive_time: Duration::from_secs(0),
+            most_used_app: None,
+            app_usage: HashMap::new(),
+            category_usage: HashMap::new(),
+        };
 
-        let mut stats = AppUsageStats::new();
-        for usage in storage.iter().filter(|u| u.start_time >= start_time) {
-            stats.add_usage(usage);
+        let storage = self.storage.lock()?;
+        for app in storage.iter().filter(|app| app.start_time >= since) {
+            stats.total_time += app.duration;
+            if app.is_productive {
+                stats.productive_time += app.duration;
+            } else {
+                stats.unproductive_time += app.duration;
+            }
+
+            // 更新应用使用统计
+            let entry = stats.app_usage.entry(app.app_name.clone())
+                .or_insert_with(|| Duration::from_secs(0));
+            *entry += app.duration;
+
+            // 更新类别使用统计
+            let entry = stats.category_usage.entry(app.category.clone())
+                .or_insert_with(|| Duration::from_secs(0));
+            *entry += app.duration;
+        }
+
+        // 找出使用时间最长的应用
+        if let Some((app, _)) = stats.app_usage.iter()
+            .max_by_key(|(_, &duration)| duration) {
+            stats.most_used_app = Some(app.clone());
         }
 
         Ok(stats)
@@ -179,60 +209,87 @@ impl AppTracker {
             .map_err(|_| TimeTrackerError::Platform("Failed to lock storage".into()))?
             .clone())
     }
+
+    fn validate_app_data(&self, data: &AppUsageData) -> Result<()> {
+        if data.duration.as_secs() == 0 {
+            return Err(TimeTrackerError::Platform("Invalid duration".into()));
+        }
+        if data.app_name.is_empty() {
+            return Err(TimeTrackerError::Platform("Empty app name".into()));
+        }
+        Ok(())
+    }
+
+    pub fn record_window(&mut self, window_info: PlatformWindowInfo) -> Result<()> {
+        let record = AppUsageRecord {
+            id: None,
+            app_name: window_info.app_name.clone(),
+            window_title: window_info.title,
+            start_time: Local::now(),
+            duration: Duration::from_secs(0),
+            category: String::new(),
+            is_productive: self.is_productive(&window_info.app_name),
+        };
+        // ... 保存记录到存储
+        Ok(())
+    }
+
+    fn check_active_window(&mut self) -> Result<()> {
+        let window_info = {
+            let platform_guard = self.platform.lock()?;
+            if let Some(platform) = platform_guard.as_ref() {
+                platform.get_active_window()?
+            } else {
+                return Err(TimeTrackerError::Platform("Platform not initialized".into()));
+            }
+        };
+
+        self.switch_to_new_app(window_info)?;
+        Ok(())
+    }
+
+    // 添加保存应用记录的方法
+    fn save_app_record(&mut self, app_data: AppUsageData) -> Result<()> {
+        self.storage.lock()?.push(app_data);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 pub struct AppUsageStats {
-    pub total_time: std::time::Duration,
-    pub productive_time: std::time::Duration,
-    pub app_durations: HashMap<String, std::time::Duration>,
-    pub category_durations: HashMap<AppCategory, std::time::Duration>,
+    pub total_time: Duration,
+    pub productive_time: Duration,
+    pub unproductive_time: Duration,
     pub most_used_app: Option<String>,
+    pub app_usage: HashMap<String, Duration>,
+    pub category_usage: HashMap<AppCategory, Duration>,
 }
 
 impl AppUsageStats {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            total_time: std::time::Duration::from_secs(0),
-            productive_time: std::time::Duration::from_secs(0),
-            app_durations: HashMap::new(),
-            category_durations: HashMap::new(),
+            total_time: Duration::from_secs(0),
+            productive_time: Duration::from_secs(0),
+            unproductive_time: Duration::from_secs(0),
             most_used_app: None,
+            app_usage: HashMap::new(),
+            category_usage: HashMap::new(),
         }
     }
 
-    fn add_usage(&mut self, usage: &AppUsageData) {
-        self.total_time += usage.duration;
-        if usage.is_productive {
-            self.productive_time += usage.duration;
-        }
-
-        // 更新应用时长
-        *self.app_durations
-            .entry(usage.app_name.clone())
-            .or_insert(std::time::Duration::from_secs(0)) += usage.duration;
-
-        // 更新类别时长
-        *self.category_durations
-            .entry(usage.category.clone())
-            .or_insert(std::time::Duration::from_secs(0)) += usage.duration;
-
-        // 更新最常用应用
-        if let Some(current_most_used) = &self.most_used_app {
-            if self.app_durations[&usage.app_name] > self.app_durations[current_most_used] {
-                self.most_used_app = Some(usage.app_name.clone());
-            }
-        } else {
-            self.most_used_app = Some(usage.app_name.clone());
-        }
-    }
-
-    pub fn get_productivity_percentage(&self) -> f64 {
+    pub fn get_productivity_ratio(&self) -> f64 {
         if self.total_time.as_secs() == 0 {
             0.0
         } else {
-            self.productive_time.as_secs_f64() / self.total_time.as_secs_f64() * 100.0
+            self.productive_time.as_secs_f64() / self.total_time.as_secs_f64()
         }
+    }
+
+    pub fn get_most_used_category(&self) -> Option<(&AppCategory, Duration)> {
+        self.category_usage
+            .iter()
+            .max_by_key(|&(_, duration)| duration)
+            .map(|(category, duration)| (category, *duration))
     }
 }
 

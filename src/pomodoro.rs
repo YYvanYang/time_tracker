@@ -3,6 +3,14 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use crate::config;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PreviousState {
+    Working,
+    ShortBreak,
+    LongBreak,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum PomodoroState {
@@ -11,13 +19,6 @@ pub enum PomodoroState {
     ShortBreak,
     LongBreak,
     Paused(PreviousState),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum PreviousState {
-    Working,
-    ShortBreak,
-    LongBreak,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +42,21 @@ impl Default for PomodoroConfig {
             long_break_interval: 4,
             auto_start_breaks: false,
             auto_start_pomodoros: false,
+            sound_enabled: true,
+            sound_volume: 80,
+        }
+    }
+}
+
+impl From<config::PomodoroConfig> for PomodoroConfig {
+    fn from(config: config::PomodoroConfig) -> Self {
+        Self {
+            work_duration: config.work_duration,
+            short_break_duration: config.short_break_duration,
+            long_break_duration: config.long_break_duration,
+            long_break_interval: config.long_break_interval,
+            auto_start_breaks: config.auto_start_breaks,
+            auto_start_pomodoros: config.auto_start_pomodoros,
             sound_enabled: true,
             sound_volume: 80,
         }
@@ -127,26 +143,14 @@ impl PomodoroTimer {
 
     pub fn start(&mut self) -> Result<()> {
         match self.state {
-            PomodoroState::Idle => {
+            PomodoroState::Idle | PomodoroState::Paused(_) => {
                 self.state = PomodoroState::Working;
                 self.remaining_time = self.config.work_duration;
                 self.start_time = Some(Instant::now());
+                Ok(())
             }
-            PomodoroState::Paused(ref prev_state) => {
-                self.state = match prev_state {
-                    PreviousState::Working => PomodoroState::Working,
-                    PreviousState::ShortBreak => PomodoroState::ShortBreak,
-                    PreviousState::LongBreak => PomodoroState::LongBreak,
-                };
-                self.start_time = Some(Instant::now());
-            }
-            _ => {
-                return Err(TimeTrackerError::Platform(
-                    "Timer is already running".into()
-                ));
-            }
+            _ => Err(TimeTrackerError::Platform("Timer is already running".into())),
         }
-        Ok(())
     }
 
     pub fn pause(&mut self) -> Result<()> {
@@ -336,6 +340,22 @@ impl PomodoroTimer {
         Ok(self.stats.lock().map_err(|_| {
             TimeTrackerError::Platform("Failed to lock stats".into())
         })?.clone())
+    }
+
+    fn validate_state_transition(&self, new_state: &PomodoroState) -> Result<()> {
+        match (&self.state, new_state) {
+            (PomodoroState::Paused(prev), PomodoroState::Working) if matches!(prev, PreviousState::Working) => Ok(()),
+            (PomodoroState::Paused(prev), PomodoroState::ShortBreak) if matches!(prev, PreviousState::ShortBreak) => Ok(()),
+            (PomodoroState::Paused(prev), PomodoroState::LongBreak) if matches!(prev, PreviousState::LongBreak) => Ok(()),
+            (PomodoroState::Idle, PomodoroState::Working) => Ok(()),
+            (PomodoroState::Working, PomodoroState::ShortBreak) => Ok(()),
+            (PomodoroState::Working, PomodoroState::LongBreak) => Ok(()),
+            (PomodoroState::ShortBreak, PomodoroState::Working) => Ok(()),
+            (PomodoroState::LongBreak, PomodoroState::Working) => Ok(()),
+            _ => Err(TimeTrackerError::State(
+                format!("Invalid state transition: {:?} -> {:?}", self.state, new_state)
+            )),
+        }
     }
 }
 

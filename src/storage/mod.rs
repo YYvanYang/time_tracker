@@ -3,27 +3,44 @@
 mod models;
 mod migrations;
 pub mod queries;
+pub mod app_state;
 
 use crate::error::{Result, TimeTrackerError};
 use chrono::{DateTime, Local, NaiveDateTime};
 use rusqlite::{Connection, params};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use r2d2_sqlite::SqliteConnectionManager;
+use r2d2::Pool;
+use crate::config;
+use serde::{Serialize, Deserialize};
+use std::time::Duration;
 
 pub use models::*;
+pub use app_state::AppStateManager;
 
 pub struct Storage {
-    conn: Arc<Mutex<Connection>>,
+    pool: Pool<SqliteConnectionManager>,
     config: StorageConfig,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
     pub data_dir: PathBuf,
     pub backup_enabled: bool,
-    pub backup_interval: std::time::Duration,
+    pub backup_interval: Duration,
+    #[serde(default = "default_max_backup_count")]
     pub max_backup_count: u32,
-    pub vacuum_threshold: u64,  // 数据库大小超过此值时自动清理（字节）
+    #[serde(default = "default_vacuum_threshold")]
+    pub vacuum_threshold: u64,
+}
+
+fn default_max_backup_count() -> u32 {
+    7
+}
+
+fn default_vacuum_threshold() -> u64 {
+    100 * 1024 * 1024  // 100MB
 }
 
 impl Default for StorageConfig {
@@ -42,38 +59,33 @@ impl Default for StorageConfig {
 
 impl Storage {
     pub fn new(config: StorageConfig) -> Result<Self> {
-        std::fs::create_dir_all(&config.data_dir)?;
-        let db_path = config.data_dir.join("timetracker.db");
+        let manager = SqliteConnectionManager::file(&config.data_dir.join("timetracker.db"));
+        let pool = Pool::new(manager)?;
         
-        let conn = Connection::open(&db_path)?;
+        // 初始化数据库
+        let mut conn = pool.get()?;
+        migrations::run_migrations(&mut conn)?;
         
-        // 启用外键约束
-        conn.execute("PRAGMA foreign_keys = ON", [])?;
-        
-        // 运行迁移
-        migrations::run_migrations(&conn)?;
-        
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            config,
-        })
+        Ok(Self { pool, config })
     }
 
     /// 创建数据库备份
-    pub fn create_backup(&self) -> Result<PathBuf> {
-        let conn = self.conn.lock().map_err(|_| {
-            TimeTrackerError::Storage("Failed to lock connection".into())
-        })?;
-
+    pub fn backup(&self) -> Result<PathBuf> {
+        let mut conn = self.pool.get()?;
         let backup_dir = self.config.data_dir.join("backups");
         std::fs::create_dir_all(&backup_dir)?;
 
-        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-        let backup_path = backup_dir.join(format!("timetracker_{}.db", timestamp));
+        // 使用更精确的时间戳格式
+        let backup_path = backup_dir.join(format!(
+            "backup_{}.db",
+            Local::now().format("%Y%m%d_%H%M%S_%3f")
+        ));
 
-        // 创建备份
-        let backup_conn = Connection::open(&backup_path)?;
-        conn.backup(rusqlite::DatabaseName::Main, &backup_conn, None)?;
+        let mut backup_conn = rusqlite::Connection::open(&backup_path)?;
+        
+        // 使用 backup API
+        let backup = rusqlite::backup::Backup::new(&*conn, &mut backup_conn)?;
+        backup.step(-1)?;
 
         // 清理旧备份
         self.cleanup_old_backups()?;
@@ -82,14 +94,14 @@ impl Storage {
     }
 
     /// 清理旧的备份文件
-    fn cleanup_old_backups(&self) -> Result<()> {
+    pub fn cleanup_old_backups(&self) -> Result<()> {
         let backup_dir = self.config.data_dir.join("backups");
         if !backup_dir.exists() {
             return Ok(());
         }
 
         let mut backups: Vec<_> = std::fs::read_dir(&backup_dir)?
-            .filter_map(Result::ok)
+            .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 entry.path()
                     .extension()
@@ -98,19 +110,18 @@ impl Storage {
             })
             .collect();
 
-        // 按修改时间排序,使用稳定排序
+        // 按修改时间排序
         backups.sort_by_key(|entry| {
             entry.metadata()
                 .and_then(|meta| meta.modified())
                 .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH)
         });
 
-        // 使用chunk_exact优化删除逻辑
-        if backups.len() > self.config.max_backup_count as usize {
-            for backup in backups.iter().take(backups.len() - self.config.max_backup_count as usize) {
-                if let Err(e) = std::fs::remove_file(backup.path()) {
-                    log::warn!("Failed to remove old backup: {}", e);
-                }
+        // 保留最新的 max_backup_count 个备份
+        while backups.len() > self.config.max_backup_count as usize {
+            if let Some(oldest) = backups.first() {
+                std::fs::remove_file(oldest.path())?;
+                backups.remove(0);
             }
         }
 
@@ -119,9 +130,7 @@ impl Storage {
 
     /// 压缩数据库
     pub fn vacuum(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            TimeTrackerError::Storage("Failed to lock connection".into())
-        })?;
+        let mut conn = self.pool.get()?;
 
         // 检查数据库大小
         let db_size: i64 = conn.query_row(
@@ -139,10 +148,7 @@ impl Storage {
 
     /// 清理旧数据
     pub fn cleanup_old_data(&self, days: u32) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            TimeTrackerError::Storage("Failed to lock connection".into())
-        })?;
-
+        let mut conn = self.pool.get()?;
         let cutoff_date = Local::now() - chrono::Duration::days(days as i64);
         
         conn.execute(
@@ -158,27 +164,9 @@ impl Storage {
         Ok(())
     }
 
-    /// 开始事务
-    pub fn transaction<T, F>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&Connection) -> Result<T>,
-    {
-        let conn = self.conn.lock().map_err(|_| {
-            TimeTrackerError::Storage("Failed to lock connection".into())
-        })?;
-
-        let tx = conn.transaction()?;
-        let result = f(&tx)?;
-        tx.commit()?;
-        
-        Ok(result)
-    }
-
     /// 检查数据库健康状况
     pub fn check_health(&self) -> Result<StorageHealth> {
-        let conn = self.conn.lock().map_err(|_| {
-            TimeTrackerError::Storage("Failed to lock connection".into())
-        })?;
+        let conn = self.pool.get()?;
 
         // 检查数据库完整性
         let integrity_check: String = conn.query_row(
@@ -253,40 +241,13 @@ impl Storage {
         Ok(None)
     }
 
-    // 添加显式的关闭方法
-    pub fn close(self) -> Result<()> {
-        let conn = Arc::try_unwrap(self.conn)
-            .map_err(|_| TimeTrackerError::Storage("Connection still in use".into()))?;
-        let conn = conn.into_inner()
-            .map_err(|_| TimeTrackerError::Storage("Failed to unwrap connection".into()))?;
-        conn.close().map_err(|e| TimeTrackerError::Storage(e.to_string()))?;
-        Ok(())
-    }
-
-    pub fn backup(&self) -> Result<()> {
-        let mut conn = self.conn.lock();
-        
-        let backup_dir = self.config.data_dir.join("backups");
-        std::fs::create_dir_all(&backup_dir)?;
-
-        let backup_path = backup_dir.join(format!(
-            "backup_{}.db",
-            Local::now().format("%Y%m%d_%H%M%S")
-        ));
-
-        let backup_conn = rusqlite::Connection::open(&backup_path)?;
-        rusqlite::backup::Backup::new(&*conn, &backup_conn)?.step(-1)?;
-
-        Ok(())
-    }
-
-    pub fn list_backups(&self) -> Result<Vec<PathBuf>> {
+    pub fn list_backups(&self) -> Result<Vec<(PathBuf, DateTime<Local>)>> {
         let backup_dir = self.config.data_dir.join("backups");
         if !backup_dir.exists() {
             return Ok(Vec::new());
         }
 
-        let entries = std::fs::read_dir(&backup_dir)?
+        let mut backups = std::fs::read_dir(&backup_dir)?
             .filter_map(|e| e.ok())
             .filter(|e| {
                 e.path()
@@ -295,21 +256,42 @@ impl Storage {
                     .map(|ext| ext == "db")
                     .unwrap_or(false)
             })
-            .map(|e| e.path())
-            .collect();
+            .filter_map(|e| {
+                let path = e.path();
+                let modified = e.metadata().ok()?.modified().ok()?;
+                let datetime = DateTime::from(modified);
+                Some((path, datetime))
+            })
+            .collect::<Vec<_>>();
 
-        Ok(entries)
+        // 按时间倒序排序
+        backups.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(backups)
     }
 
     pub fn execute_transaction<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&rusqlite::Transaction) -> Result<T>,
     {
-        let mut conn = self.conn.lock();
+        let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
-        let result = f(&tx)?;
-        tx.commit()?;
-        Ok(result)
+        
+        match f(&tx) {
+            Ok(result) => {
+                tx.commit()?;
+                Ok(result)
+            }
+            Err(e) => {
+                tx.rollback()?;
+                Err(e)
+            }
+        }
+    }
+
+    pub fn execute_query(&self, query: &str) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute(query, [])?;
+        Ok(())
     }
 }
 
@@ -323,6 +305,18 @@ pub struct StorageHealth {
     pub needs_vacuum: bool,
 }
 
+impl From<config::StorageConfig> for StorageConfig {
+    fn from(config: config::StorageConfig) -> Self {
+        Self {
+            data_dir: config.data_dir,
+            backup_enabled: config.backup_enabled,
+            backup_interval: config.backup_interval,
+            max_backup_count: config.max_backup_count,
+            vacuum_threshold: config.vacuum_threshold,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,7 +326,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let config = StorageConfig {
             data_dir: temp_dir.path().to_path_buf(),
-            ..StorageConfig::default()
+            backup_enabled: true,
+            backup_interval: Duration::from_secs(60),
+            max_backup_count: 3,
+            vacuum_threshold: 1024 * 1024,  // 1MB
         };
         let storage = Storage::new(config).unwrap();
         (storage, temp_dir)
@@ -350,17 +347,22 @@ mod tests {
         let (storage, _temp_dir) = create_test_storage();
         
         // 创建多个备份
-        for _ in 0..10 {
-            storage.create_backup()?;
+        for _ in 0..5 {
+            storage.backup()?;
+            std::thread::sleep(Duration::from_millis(100)); // 确保时间戳不同
         }
 
         // 验证备份数量限制
-        let backup_dir = storage.config.data_dir.join("backups");
-        let backup_count = std::fs::read_dir(backup_dir)?
-            .filter_map(|entry| entry.ok())
-            .count();
+        let backups = storage.list_backups()?;
+        assert_eq!(backups.len(), storage.config.max_backup_count as usize);
 
-        assert_eq!(backup_count, storage.config.max_backup_count as usize);
+        // 验证是保留了最新的备份
+        let backup_times: Vec<_> = backups.iter()
+            .filter_map(|path| path.metadata().ok())
+            .filter_map(|meta| meta.modified().ok())
+            .collect();
+        
+        assert!(backup_times.windows(2).all(|w| w[0] > w[1]));
 
         Ok(())
     }
@@ -373,7 +375,7 @@ mod tests {
         storage.cleanup_old_data(30)?;
         
         // 验证清理后的数据
-        let conn = storage.conn.lock().unwrap();
+        let conn = storage.pool.get()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM app_usage WHERE start_time < ?",
             params![Local::now() - chrono::Duration::days(30)],
@@ -381,6 +383,33 @@ mod tests {
         )?;
 
         assert_eq!(count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_transaction() -> Result<()> {
+        let (storage, _temp_dir) = create_test_storage();
+
+        // 测试成功的事务
+        let result = storage.execute_transaction(|tx| {
+            tx.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)", [])?;
+            tx.execute("INSERT INTO test VALUES (?1)", [1])?;
+            Ok(())
+        });
+        assert!(result.is_ok());
+
+        // 测试失败的事务
+        let result = storage.execute_transaction(|tx| {
+            tx.execute("INSERT INTO test VALUES (?1)", [2])?;
+            Err(TimeTrackerError::Storage("Test rollback".into()))
+        });
+        assert!(result.is_err());
+
+        // 验证回滚
+        let conn = storage.pool.get()?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))?;
+        assert_eq!(count, 1);  // 只有第一个事务的数据
+
         Ok(())
     }
 }

@@ -26,126 +26,76 @@ pub const DARK_ERROR: Color32 = Color32::from_rgb(255, 82, 82);
 pub const DARK_TEXT: Color32 = Color32::from_rgb(255, 255, 255);
 pub const DARK_TEXT_SECONDARY: Color32 = Color32::from_rgb(189, 189, 189);
 
-pub fn apply_theme(ctx: &egui::Context, app: &TimeTrackerApp) {
-    let config = app.get_config();
-    let visuals = match config.ui.theme {
-        AppTheme::Light => light_theme(),
-        AppTheme::Dark => dark_theme(),
-        AppTheme::System => {
-            if is_dark_mode_enabled() {
-                dark_theme()
-            } else {
-                light_theme()
-            }
-        }
-    };
-
-    let mut style = Style::default();
-    style.spacing.item_spacing = egui::vec2(SPACING, SPACING);
-    style.spacing.window_margin = egui::Margin::same(PADDING);
-    style.visuals = visuals;
-
+pub fn apply_theme(ctx: &egui::Context, is_dark: bool) {
+    let mut style = (*ctx.style()).clone();
+    style.visuals = if is_dark { dark_theme() } else { light_theme() };
     ctx.set_style(style);
 }
 
-fn light_theme() -> Visuals {
-    Visuals {
-        dark_mode: false,
-        override_text_color: Some(LIGHT_TEXT),
-        widgets: egui::style::Widgets {
-            noninteractive: egui::style::WidgetVisuals {
-                weak_bg_fill: LIGHT_SURFACE.linear_multiply(0.7),
-                bg_fill: LIGHT_SURFACE,
-                bg_stroke: Stroke::new(1.0, LIGHT_TEXT_SECONDARY),
-                fg_stroke: Stroke::new(1.0, LIGHT_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 0.0,
-            },
-            inactive: egui::style::WidgetVisuals {
-                weak_bg_fill: LIGHT_SURFACE.linear_multiply(0.7),
-                bg_fill: LIGHT_SURFACE,
-                bg_stroke: Stroke::new(1.0, LIGHT_PRIMARY),
-                fg_stroke: Stroke::new(1.0, LIGHT_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 0.0,
-            },
-            hovered: egui::style::WidgetVisuals {
-                bg_fill: LIGHT_PRIMARY.linear_multiply(0.9),
-                bg_stroke: Stroke::new(1.0, LIGHT_PRIMARY),
-                fg_stroke: Stroke::new(1.5, LIGHT_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-            active: egui::style::WidgetVisuals {
-                bg_fill: LIGHT_PRIMARY,
-                bg_stroke: Stroke::new(1.0, LIGHT_PRIMARY),
-                fg_stroke: Stroke::new(2.0, LIGHT_BACKGROUND),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-            open: egui::style::WidgetVisuals {
-                bg_fill: LIGHT_PRIMARY.linear_multiply(0.8),
-                bg_stroke: Stroke::new(1.0, LIGHT_PRIMARY),
-                fg_stroke: Stroke::new(1.0, LIGHT_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-        },
-        selection: egui::style::Selection {
-            bg_fill: LIGHT_PRIMARY.linear_multiply(0.3),
-            stroke: Stroke::new(1.0, LIGHT_PRIMARY),
-        },
-        ..Visuals::light()
+fn create_widget_visuals(
+    bg_fill: Color32,
+    weak_bg_fill: Color32,
+    bg_stroke: Stroke,
+    fg_stroke: Stroke,
+    rounding: f32,
+    expansion: f32,
+) -> egui::style::WidgetVisuals {
+    egui::style::WidgetVisuals {
+        bg_fill,
+        weak_bg_fill,
+        bg_stroke,
+        fg_stroke,
+        rounding: rounding.into(),
+        expansion,
     }
 }
 
 fn dark_theme() -> Visuals {
-    Visuals {
-        dark_mode: true,
-        override_text_color: Some(DARK_TEXT),
-        widgets: egui::style::Widgets {
-            noninteractive: egui::style::WidgetVisuals {
-                bg_fill: DARK_SURFACE,
-                bg_stroke: Stroke::new(1.0, DARK_TEXT_SECONDARY),
-                fg_stroke: Stroke::new(1.0, DARK_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 0.0,
-            },
-            inactive: egui::style::WidgetVisuals {
-                bg_fill: DARK_SURFACE,
-                bg_stroke: Stroke::new(1.0, DARK_PRIMARY),
-                fg_stroke: Stroke::new(1.0, DARK_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 0.0,
-            },
-            hovered: egui::style::WidgetVisuals {
-                bg_fill: DARK_PRIMARY.linear_multiply(0.9),
-                bg_stroke: Stroke::new(1.0, DARK_PRIMARY),
-                fg_stroke: Stroke::new(1.5, DARK_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-            active: egui::style::WidgetVisuals {
-                bg_fill: DARK_PRIMARY,
-                bg_stroke: Stroke::new(1.0, DARK_PRIMARY),
-                fg_stroke: Stroke::new(2.0, DARK_BACKGROUND),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-            open: egui::style::WidgetVisuals {
-                bg_fill: DARK_PRIMARY.linear_multiply(0.8),
-                bg_stroke: Stroke::new(1.0, DARK_PRIMARY),
-                fg_stroke: Stroke::new(1.0, DARK_TEXT),
-                rounding: Rounding::same(ROUNDING),
-                expansion: 1.0,
-            },
-        },
-        selection: egui::style::Selection {
-            bg_fill: DARK_PRIMARY.linear_multiply(0.3),
-            stroke: Stroke::new(1.0, DARK_PRIMARY),
-        },
-        ..Visuals::dark()
-    }
+    let mut visuals = Visuals::dark();
+    
+    visuals.widgets.active = create_widget_visuals(
+        Color32::from_rgb(70, 70, 70),      // bg_fill
+        Color32::from_rgb(60, 60, 60),      // weak_bg_fill
+        Stroke::new(1.0, Color32::from_rgb(140, 140, 140)), // bg_stroke
+        Stroke::new(1.0, Color32::from_rgb(255, 255, 255)), // fg_stroke
+        2.0,  // rounding
+        1.0,  // expansion
+    );
+
+    visuals.widgets.open = create_widget_visuals(
+        Color32::from_rgb(50, 50, 50),      // bg_fill
+        Color32::from_rgb(40, 40, 40),      // weak_bg_fill
+        Stroke::new(1.0, Color32::from_rgb(120, 120, 120)), // bg_stroke
+        Stroke::new(1.0, Color32::from_rgb(200, 200, 200)), // fg_stroke
+        2.0,  // rounding
+        0.0,  // expansion
+    );
+
+    visuals
+}
+
+fn light_theme() -> Visuals {
+    let mut visuals = Visuals::light();
+    
+    visuals.widgets.active = create_widget_visuals(
+        Color32::from_rgb(220, 220, 220),   // bg_fill
+        Color32::from_rgb(210, 210, 210),   // weak_bg_fill
+        Stroke::new(1.0, Color32::from_rgb(160, 160, 160)), // bg_stroke
+        Stroke::new(1.0, Color32::from_rgb(0, 0, 0)),       // fg_stroke
+        2.0,  // rounding
+        1.0,  // expansion
+    );
+
+    visuals.widgets.open = create_widget_visuals(
+        Color32::from_rgb(230, 230, 230),   // bg_fill
+        Color32::from_rgb(220, 220, 220),   // weak_bg_fill
+        Stroke::new(1.0, Color32::from_rgb(180, 180, 180)), // bg_stroke
+        Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),    // fg_stroke
+        2.0,  // rounding
+        0.0,  // expansion
+    );
+
+    visuals
 }
 
 #[cfg(target_os = "windows")]

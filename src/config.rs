@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
 use std::time::Duration;
-use notify::{Watcher, RecursiveMode, watcher};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc::channel;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +22,9 @@ pub struct Config {
     
     #[serde(default)]
     pub storage: StorageConfig,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +74,18 @@ pub struct StorageConfig {
     pub data_dir: PathBuf,
     pub backup_enabled: bool,
     pub backup_interval: Duration,
-    pub keep_data_days: u32,
+    #[serde(default = "default_max_backup_count")]
+    pub max_backup_count: u32,
+    #[serde(default = "default_vacuum_threshold")]
+    pub vacuum_threshold: u64,
+}
+
+fn default_max_backup_count() -> u32 {
+    7
+}
+
+fn default_vacuum_threshold() -> u64 {
+    100 * 1024 * 1024  // 100MB
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,6 +103,7 @@ impl Default for Config {
             shutdown: ShutdownConfig::default(),
             ui: UiConfig::default(),
             storage: StorageConfig::default(),
+            version: None,
         }
     }
 }
@@ -154,7 +169,8 @@ impl Default for StorageConfig {
                 .join("time_tracker"),
             backup_enabled: true,
             backup_interval: Duration::from_secs(24 * 60 * 60), // 每天
-            keep_data_days: 90,
+            max_backup_count: 7,
+            vacuum_threshold: 100 * 1024 * 1024,  // 100MB
         }
     }
 }
@@ -181,7 +197,7 @@ impl Config {
         Ok(())
     }
 
-    fn get_config_path() -> Result<PathBuf> {
+    pub fn get_config_path() -> Result<PathBuf> {
         dirs::config_dir()
             .map(|p| p.join("time_tracker").join("config.json"))
             .ok_or_else(|| TimeTrackerError::Config(
@@ -201,35 +217,28 @@ impl Config {
                 "Short break duration must be at least 30 seconds".into()
             ));
         }
-        if self.pomodoro.long_break_duration < Duration::from_secs(60) {
-            return Err(TimeTrackerError::Config(
-                "Long break duration must be at least 1 minute".into()
-            ));
-        }
-        if self.pomodoro.long_break_interval < 1 {
-            return Err(TimeTrackerError::Config(
-                "Long break interval must be at least 1".into()
-            ));
-        }
 
-        // 验证关机配置
-        if self.shutdown.enabled {
-            if self.shutdown.delay_minutes == 0 {
-                return Err(TimeTrackerError::Config(
-                    "Shutdown delay must be greater than 0".into()
-                ));
-            }
-            if self.shutdown.pomodoros_before_shutdown == 0 {
-                return Err(TimeTrackerError::Config(
-                    "Pomodoros before shutdown must be greater than 0".into()
-                ));
-            }
+        // 验证存储配置
+        if self.storage.max_backup_count == 0 {
+            return Err(TimeTrackerError::Config(
+                "Max backup count must be greater than 0".into()
+            ));
+        }
+        if self.storage.vacuum_threshold == 0 {
+            return Err(TimeTrackerError::Config(
+                "Vacuum threshold must be greater than 0".into()
+            ));
+        }
+        if self.storage.backup_interval < Duration::from_secs(60) {
+            return Err(TimeTrackerError::Config(
+                "Backup interval must be at least 1 minute".into()
+            ));
         }
 
         // 验证UI配置
         if self.ui.window_width < 400 || self.ui.window_height < 300 {
             return Err(TimeTrackerError::Config(
-                "Window size too small".into()
+                "Window size must be at least 400x300".into()
             ));
         }
         if self.ui.font_size < 8 || self.ui.font_size > 32 {
@@ -238,36 +247,29 @@ impl Config {
             ));
         }
 
-        // 验证存储配置
-        if self.storage.keep_data_days == 0 {
-            return Err(TimeTrackerError::Config(
-                "Keep data days must be greater than 0".into()
-            ));
-        }
-
         Ok(())
     }
 
-    pub fn watch_changes(&self) -> Result<()> {
-        let config_path = Config::get_config_path()?;
+    pub fn watch(&mut self) -> Result<()> {
         let (tx, rx) = channel();
+        let mut watcher: RecommendedWatcher = Watcher::new(tx, notify::Config::default())?;
+        
+        watcher.watch(
+            Config::get_config_path()?.parent().unwrap(),
+            RecursiveMode::NonRecursive
+        )?;
 
-        let mut watcher = watcher(tx, Duration::from_secs(2))?;
-        watcher.watch(config_path, RecursiveMode::NonRecursive)?;
-
-        let mut config = self.clone();
-        std::thread::spawn(move || {
-            for result in rx {
-                match result {
-                    Ok(_) => {
-                        if let Err(e) = config.reload() {
-                            log::error!("Failed to reload config: {}", e);
-                        }
+        // 处理文件变更事件
+        for res in rx {
+            match res {
+                Ok(event) => {
+                    if let notify::EventKind::Modify(_) = event.kind {
+                        self.reload()?;
                     }
-                    Err(e) => log::error!("Watch error: {}", e),
                 }
+                Err(e) => log::error!("Watch error: {:?}", e),
             }
-        });
+        }
 
         Ok(())
     }
@@ -279,6 +281,22 @@ impl Config {
         } else {
             Err(TimeTrackerError::Config("Failed to reload config".into()))
         }
+    }
+
+    fn migrate(&mut self) -> Result<()> {
+        let version = self.version.unwrap_or(0);
+        match version {
+            0 => {
+                // 迁移到版本 1
+                self.version = Some(1);
+            }
+            1 => {
+                // 迁移到版本 2
+                self.version = Some(2);
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 

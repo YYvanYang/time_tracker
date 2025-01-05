@@ -5,30 +5,43 @@ mod views;
 mod styles;
 mod theme;
 
+use crate::config::Theme as AppTheme;
 use crate::error::Result;
 use crate::config::Config;
 use crate::storage::Storage;
 use crate::app_tracker::AppTracker;
 use crate::pomodoro::PomodoroTimer;
 use crate::storage::app_state::AppStateManager;
+use crate::tray::{TrayManager, TrayEvent};
+use crate::hotkeys::HotkeyManager;
 use components::*;
 use eframe::egui;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, mpsc::Receiver};
 use views::*;
-use crate::ui::components::Dialog;
+use crate::ui::components::Dialog as ComponentDialog;
 use crate::ui::components::dialog::{ProjectDialog, TagDialog, ExportDialog, SettingsDialog, ConfirmationDialog};
-use parking_lot::Mutex;
+use std::collections::{HashSet, VecDeque, HashMap};
+use crate::storage::{Project, Tag, PomodoroStatus};
+use crate::error::TimeTrackerError;
+use crate::storage::app_state::AppState;
 
 pub struct TimeTrackerApp {
     config: Arc<Mutex<Config>>,
-    storage: Arc<Storage>,
-    app_tracker: Arc<AppTracker>,
-    pomodoro: Arc<PomodoroTimer>,
-    state_manager: Arc<AppStateManager>,
-    current_view: View,
-    dialog_stack: Vec<Dialog>,
-    loading: bool,
-    error: Option<String>,
+    storage: Arc<Mutex<Storage>>,
+    pomodoro_timer: Arc<Mutex<PomodoroTimer>>,
+    app_tracker: Arc<Mutex<AppTracker>>,
+    app_state_manager: Arc<Mutex<AppStateManager>>,
+    tray_manager: Arc<Mutex<TrayManager>>,
+    hotkey_manager: Arc<Mutex<HotkeyManager>>,
+    tray_event_receiver: Receiver<TrayEvent>,
+    current_project: Option<Project>,
+    ui_state: UiState,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DialogResult {
+    pub success: bool,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,61 +54,70 @@ pub enum View {
     Settings,
 }
 
-#[derive(Debug)]
-pub enum Dialog {
-    AddProject(ProjectDialog),
-    EditProject(ProjectDialog),
-    AddTag(TagDialog),
-    Export(ExportDialog),
-    Settings(SettingsDialog),
-    Confirmation(ConfirmationDialog),
+impl Default for View {
+    fn default() -> Self {
+        Self::Overview
+    }
+}
+
+#[derive(Default)]
+struct UiState {
+    current_view: View,
+    dialog_stack: Vec<Box<dyn DialogHandler + Send>>,
+    loading: bool,
+    error: Option<String>,
+    current_note: Option<String>,
 }
 
 impl TimeTrackerApp {
     pub fn new(
-        config: Config,
-        storage: Storage,
-        app_tracker: AppTracker,
-        pomodoro: PomodoroTimer,
-        state_manager: AppStateManager,
+        config: Arc<Mutex<Config>>,
+        storage: Arc<Mutex<Storage>>,
+        pomodoro_timer: Arc<Mutex<PomodoroTimer>>,
+        app_tracker: Arc<Mutex<AppTracker>>,
+        app_state_manager: Arc<Mutex<AppStateManager>>,
+        tray_manager: Arc<Mutex<TrayManager>>,
+        hotkey_manager: Arc<Mutex<HotkeyManager>>,
+        tray_event_receiver: Receiver<TrayEvent>,
     ) -> Self {
         Self {
-            config: Arc::new(Mutex::new(config)),
-            storage: Arc::new(storage),
-            app_tracker: Arc::new(app_tracker),
-            pomodoro: Arc::new(pomodoro),
-            state_manager: Arc::new(state_manager),
-            current_view: View::Overview,
-            dialog_stack: Vec::new(),
-            loading: false,
-            error: None,
+            config,
+            storage,
+            pomodoro_timer,
+            app_tracker,
+            app_state_manager,
+            tray_manager,
+            hotkey_manager,
+            tray_event_receiver,
+            current_project: None,
+            ui_state: UiState::default(),
         }
     }
 
     fn show_error(&mut self, error: String) {
         log::error!("UI Error: {}", error);
-        self.error = Some(error);
+        self.ui_state.error = Some(error);
     }
 
     fn clear_error(&mut self) {
-        self.error = None;
+        self.ui_state.error = None;
     }
 
-    fn push_dialog(&mut self, dialog: Dialog) {
-        self.dialog_stack.push(dialog);
+    fn push_dialog(&mut self, dialog: Box<dyn DialogHandler + Send>) {
+        self.ui_state.dialog_stack.push(dialog);
     }
 
-    fn pop_dialog(&mut self) -> Option<Dialog> {
-        self.dialog_stack.pop()
+    fn pop_dialog(&mut self) -> Option<Box<dyn DialogHandler + Send>> {
+        self.ui_state.dialog_stack.pop()
     }
 
     fn show_confirmation(
         &mut self,
         title: String,
         message: String,
-        on_confirm: Box<dyn FnOnce(&mut Self) -> Result<()>>,
+        on_confirm: Box<dyn FnOnce(&mut Self) -> Result<()> + Send>,
     ) {
-        self.push_dialog(Dialog::Confirmation(ConfirmationDialog {
+        self.push_dialog(Box::new(ConfirmationDialog {
             title,
             message,
             on_confirm: Some(on_confirm),
@@ -103,8 +125,13 @@ impl TimeTrackerApp {
         }));
     }
 
-    pub fn show_confirmation_dialog(&mut self, title: String, message: String, on_confirm: Box<dyn FnOnce()>) {
-        self.push_dialog(Dialog::Confirmation(ConfirmationDialog {
+    pub fn show_confirmation_dialog(
+        &mut self, 
+        title: String, 
+        message: String, 
+        on_confirm: Box<dyn FnOnce() + Send>
+    ) {
+        self.push_dialog(Box::new(ConfirmationDialog {
             title,
             message,
             on_confirm: Some(Box::new(move |_| {
@@ -116,33 +143,58 @@ impl TimeTrackerApp {
     }
 
     pub fn save_config(&mut self) -> Result<()> {
-        let config = self.config.lock();
+        let mut config = self.config.lock()?;
         config.save()?;
         Ok(())
     }
 
-    pub fn get_config(&self) -> parking_lot::MutexGuard<Config> {
-        self.config.lock()
+    pub fn get_config(&self) -> std::sync::MutexGuard<Config> {
+        self.config.lock().unwrap()
+    }
+
+    pub fn get_current_project(&self) -> Option<&Project> {
+        self.current_project.as_ref()
+    }
+
+    fn save_state(&mut self) -> Result<()> {
+        // 先获取错误信息
+        let save_result = {
+            let mut state_manager = self.app_state_manager.lock()?;
+            state_manager.save_state()
+        };
+
+        // 然后处理错误
+        if let Err(e) = save_result {
+            log::error!("Failed to save app state: {}", e);
+            self.show_error(format!("Failed to save app state: {}", e));
+        }
+        Ok(())
     }
 }
 
 impl eframe::App for TimeTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 更新主题
-        theme::apply_theme(ctx, &self.config);
+        // 获取主题设置
+        let is_dark = match self.config.lock().unwrap().ui.theme {
+            AppTheme::Dark => true,
+            AppTheme::Light => false,
+            AppTheme::System => is_dark_mode_enabled(),
+        };
+        
+        theme::apply_theme(ctx, is_dark);
 
         // 显示顶部菜单栏
         self.show_top_panel(ctx);
 
         // 显示侧边栏（如果不是紧凑模式）
-        if !self.config.lock().ui.compact_mode {
+        if !self.config.lock().unwrap().ui.compact_mode {
             self.show_sidebar(ctx);
         }
 
         // 显示主内容区域
         egui::CentralPanel::default().show(ctx, |ui| {
             // 显示错误信息（如果有）
-            if let Some(error) = &self.error {
+            if let Some(error) = &self.ui_state.error {
                 ui.colored_label(
                     styles::COLOR_ERROR,
                     error,
@@ -154,7 +206,7 @@ impl eframe::App for TimeTrackerApp {
             }
 
             // 显示当前视图
-            match self.current_view {
+            match self.ui_state.current_view {
                 View::Overview => overview::render(self, ui),
                 View::AppUsage => app_usage::render(self, ui),
                 View::Pomodoro => pomodoro::render(self, ui),
@@ -165,12 +217,12 @@ impl eframe::App for TimeTrackerApp {
         });
 
         // 显示对话框
-        if !self.dialog_stack.is_empty() {
+        if !self.ui_state.dialog_stack.is_empty() {
             self.show_dialogs(ctx);
         }
 
         // 显示加载指示器
-        if self.loading {
+        if self.ui_state.loading {
             self.show_loading_indicator(ctx);
         }
 
@@ -195,34 +247,34 @@ impl TimeTrackerApp {
             ui.horizontal(|ui| {
                 ui.menu_button("文件", |ui| {
                     if ui.button("导出数据").clicked() {
-                        self.push_dialog(Dialog::Export(ExportDialog::default()));
+                        self.push_dialog(Box::new(ExportDialog::default()));
                         ui.close_menu();
                     }
                     if ui.button("设置").clicked() {
-                        self.push_dialog(Dialog::Settings(SettingsDialog::new(&self.config)));
+                        self.push_dialog(Box::new(SettingsDialog::new(&self.config)));
                         ui.close_menu();
                     }
                 });
 
                 ui.menu_button("视图", |ui| {
                     if ui.button("概览").clicked() {
-                        self.current_view = View::Overview;
+                        self.ui_state.current_view = View::Overview;
                         ui.close_menu();
                     }
                     if ui.button("应用统计").clicked() {
-                        self.current_view = View::AppUsage;
+                        self.ui_state.current_view = View::AppUsage;
                         ui.close_menu();
                     }
                     if ui.button("番茄钟").clicked() {
-                        self.current_view = View::Pomodoro;
+                        self.ui_state.current_view = View::Pomodoro;
                         ui.close_menu();
                     }
                     if ui.button("项目").clicked() {
-                        self.current_view = View::Projects;
+                        self.ui_state.current_view = View::Projects;
                         ui.close_menu();
                     }
                     if ui.button("统计").clicked() {
-                        self.current_view = View::Statistics;
+                        self.ui_state.current_view = View::Statistics;
                         ui.close_menu();
                     }
                 });
@@ -247,66 +299,63 @@ impl TimeTrackerApp {
     }
 
     fn show_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("side_panel")
-            .resizable(false)
-            .default_width(200.0)
-            .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::Overview,
-                        "概览",
-                    );
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::AppUsage,
-                        "应用统计",
-                    );
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::Pomodoro,
-                        "番茄钟",
-                    );
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::Projects,
-                        "项目",
-                    );
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::Statistics,
-                        "统计",
-                    );
-                    ui.selectable_value(
-                        &mut self.current_view,
-                        View::Settings,
-                        "设置",
-                    );
+        let config = self.config.lock().unwrap();
+        if !config.ui.compact_mode {
+            egui::SidePanel::left("side_panel")
+                .resizable(false)
+                .default_width(200.0)
+                .show(ctx, |ui| {
+                    ui.vertical(|ui| {
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::Overview,
+                            "概览",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::AppUsage,
+                            "应用统计",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::Pomodoro,
+                            "番茄钟",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::Projects,
+                            "项目",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::Statistics,
+                            "统计",
+                        );
+                        ui.selectable_value(
+                            &mut self.ui_state.current_view,
+                            View::Settings,
+                            "设置",
+                        );
+                    });
                 });
-            });
+        }
     }
 
     fn show_dialogs(&mut self, ctx: &egui::Context) {
-        use crate::ui::components::dialog::Dialog;
-        
-        if let Some(dialog) = self.dialog_stack.last_mut() {
-            match dialog {
-                Dialog::Project(dialog) => {
-                    dialog.show(ctx, self);
-                }
-                Dialog::Tag(dialog) => {
-                    dialog.show(ctx, self);
-                }
-                Dialog::Export(dialog) => {
-                    dialog.show(ctx, self);
-                }
-                Dialog::Settings(dialog) => {
-                    dialog.show(ctx, self);
-                }
-                Dialog::Confirmation(dialog) => {
-                    dialog.show(ctx, self);
-                }
+        let mut dialog_closed = false;
+        if let Some(dialog) = self.ui_state.dialog_stack.last_mut() {
+            let mut dialog_context = DialogContext {
+                config: self.config.lock().unwrap(),
+                state: self.app_state_manager.lock().unwrap().get_state().unwrap(),
+                storage: self.storage.lock().unwrap(),
+            };
+
+            if !dialog.show(ctx, &mut dialog_context) {
+                dialog_closed = true;
             }
+        }
+        if dialog_closed {
+            self.ui_state.dialog_stack.pop();
         }
     }
 
@@ -321,6 +370,42 @@ impl TimeTrackerApp {
                     ui.label("请稍候...");
                 });
             });
+    }
+
+    fn show_dialog(&mut self, ctx: &egui::Context) {
+        let dialog = match self.ui_state.dialog_stack.last_mut() {
+            Some(dialog) => dialog,
+            None => return,
+        };
+
+        let mut dialog_context = DialogContext {
+            config: self.config.lock().unwrap(),
+            state: self.app_state_manager.lock().unwrap().get_state().unwrap(),
+            storage: self.storage.lock().unwrap(),
+        };
+
+        if !dialog.show(ctx, &mut dialog_context) {
+            self.ui_state.dialog_stack.pop();
+        }
+    }
+
+    fn push_settings_dialog(&mut self) {
+        let dialog = {
+            let config = self.config.lock().unwrap();
+            SettingsDialog::new(&*config)
+        };
+        self.push_dialog(Box::new(dialog));
+    }
+}
+
+impl std::fmt::Debug for TimeTrackerApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimeTrackerApp")
+            .field("current_view", &self.ui_state.current_view)
+            .field("loading", &self.ui_state.loading)
+            .field("error", &self.ui_state.error)
+            .field("dialog_count", &self.ui_state.dialog_stack.len())
+            .finish()
     }
 }
 
@@ -356,47 +441,84 @@ mod tests {
     fn test_dialog_management() {
         let (mut app, _temp_dir) = create_test_app();
 
-        assert_eq!(app.current_view, View::Overview);
+        assert_eq!(app.ui_state.current_view, View::Overview);
 
         // 测试视图切换
-        app.current_view = View::Pomodoro;
-        assert_eq!(app.current_view, View::Pomodoro);
+        app.ui_state.current_view = View::Pomodoro;
+        assert_eq!(app.ui_state.current_view, View::Pomodoro);
 
-        app.current_view = View::Statistics;
-        assert_eq!(app.current_view, View::Statistics);
+        app.ui_state.current_view = View::Statistics;
+        assert_eq!(app.ui_state.current_view, View::Statistics);
     }
 
     #[test]
     fn test_error_management() {
         let (mut app, _temp_dir) = create_test_app();
 
-        assert!(app.error.is_none());
+        assert!(app.ui_state.error.is_none());
 
         app.show_error("Test error".to_string());
-        assert_eq!(app.error, Some("Test error".to_string()));
+        assert_eq!(app.ui_state.error, Some("Test error".to_string()));
 
         app.clear_error();
-        assert!(app.error.is_none());
+        assert!(app.ui_state.error.is_none());
     }
 
     #[test]
     fn test_view_switching() {
         let (mut app, _temp_dir) = create_test_app();
-
-        // 测试对话框堆栈
-        assert!(app.dialog_stack.is_empty());
-
-        app.push_dialog(Dialog::Confirmation(ConfirmationDialog {
+        
+        assert!(app.ui_state.dialog_stack.is_empty());
+        
+        app.push_dialog(Box::new(ConfirmationDialog {
             title: "Test".to_string(),
             message: "Test message".to_string(),
             on_confirm: None,
             on_cancel: None,
         }));
-
-        assert_eq!(app.dialog_stack.len(), 1);
-
+        
+        assert_eq!(app.ui_state.dialog_stack.len(), 1);
+        
         let dialog = app.pop_dialog();
-        assert!(matches!(dialog, Some(Dialog::Confirmation(_))));
-        assert!(app.dialog_stack.is_empty());
+        assert!(dialog.is_some());
+        assert!(app.ui_state.dialog_stack.is_empty());
     }
+}
+
+// 修改 DialogContext 的定义，使用 MutexGuard
+pub struct DialogContext<'a> {
+    pub config: std::sync::MutexGuard<'a, Config>,
+    pub state: std::sync::MutexGuard<'a, AppState>,
+    pub storage: std::sync::MutexGuard<'a, Storage>,
+}
+
+// 修改 DialogHandler trait 以适应新的 DialogContext
+pub trait DialogHandler {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool;
+}
+
+#[cfg(target_os = "windows")]
+fn is_dark_mode_enabled() -> bool {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+    ) {
+        if let Ok(dark_mode) = hkcu.get_value::<u32, _>("AppsUseLightTheme") {
+            return dark_mode == 0;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn is_dark_mode_enabled() -> bool {
+    // macOS 实现...
+    false
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn is_dark_mode_enabled() -> bool {
+    false
 }

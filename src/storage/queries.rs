@@ -2,10 +2,12 @@
 
 use super::models::*;
 use crate::error::{Result, TimeTrackerError};
-use chrono::{DateTime, Local, NaiveDateTime, Timelike, Datelike};
-use rusqlite::{params, Connection, Row, Statement};
+use rusqlite::{Connection, params, Row};
+use chrono::{DateTime, Local, NaiveDateTime, Datelike, Timelike};
 use std::collections::HashMap;
 use std::time::Duration;
+
+#[cfg(test)]
 use test_log;
 
 pub trait FromRow {
@@ -216,7 +218,7 @@ pub fn get_pomodoro_tags(conn: &Connection, pomodoro_id: i64) -> Result<Vec<Stri
 
     let tags = stmt.query_map([pomodoro_id], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|e| TimeTrackerError::Database(e.to_string()))?;
+        .map_err(|e| TimeTrackerError::Database(e))?;
 
     Ok(tags)
 }

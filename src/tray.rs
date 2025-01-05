@@ -1,12 +1,9 @@
 //src/tray.rs
 
-use crate::error::Result;
-use std::sync::mpsc;
+use crate::error::{Result, TimeTrackerError};
+use std::sync::mpsc::{self, Sender};
+use std::path::PathBuf;
 use tray_item::{IconSource, TrayItem};
-
-#[cfg(target_os = "windows")]
-use winapi::um::winuser;
-use winapi::shared::windef::HWND;
 
 pub enum TrayEvent {
     Show,
@@ -19,92 +16,63 @@ pub enum TrayEvent {
 
 pub struct TrayManager {
     tray: TrayItem,
-    event_sender: mpsc::Sender<TrayEvent>,
-    event_receiver: mpsc::Receiver<TrayEvent>,
+    event_sender: Sender<TrayEvent>,
+    icon_base_path: String,
 }
 
 impl TrayManager {
-    pub fn new() -> Result<Self> {
-        let (tx, rx) = mpsc::channel();
-        let sender = tx.clone();
-
-        let mut tray = TrayItem::new(
+    pub fn new(icon_path: PathBuf, event_sender: Sender<TrayEvent>) -> Result<Self> {
+        let icon_base_path = icon_path.to_str()
+            .ok_or_else(|| TimeTrackerError::Platform("Invalid icon path".into()))?
+            .to_string();
+        
+        let icon_path_str = icon_base_path.clone();
+        
+        let tray = TrayItem::new(
             "Time Tracker",
-            IconSource::Resource("tray-icon"), // 需要在资源文件中定义图标
+            IconSource::Resource(Box::leak(icon_path_str.into_boxed_str()))
         )?;
-
-        // 设置托盘菜单
-        tray.add_menu_item("显示主窗口", move || {
-            sender.send(TrayEvent::Show).ok();
-        })?;
-
-        let sender = tx.clone();
-        tray.add_menu_item("开始番茄钟", move || {
-            sender.send(TrayEvent::StartPomodoro).ok();
-        })?;
-
-        let sender = tx.clone();
-        tray.add_menu_item("暂停番茄钟", move || {
-            sender.send(TrayEvent::PausePomodoro).ok();
-        })?;
-
-        let sender = tx.clone();
-        tray.add_menu_item("停止番茄钟", move || {
-            sender.send(TrayEvent::StopPomodoro).ok();
-        })?;
-
-        tray.add_menu_separator()?;
-
-        let sender = tx.clone();
-        tray.add_menu_item("退出", move || {
-            sender.send(TrayEvent::Exit).ok();
-        })?;
-
+        
         Ok(Self {
             tray,
-            event_sender: tx,
-            event_receiver: rx,
+            event_sender,
+            icon_base_path,
         })
     }
 
     pub fn set_icon(&mut self, icon_name: &str) -> Result<()> {
-        self.tray.set_icon(IconSource::Resource(icon_name))?;
+        let icon_str = Box::leak(icon_name.to_string().into_boxed_str());
+        self.tray.set_icon(IconSource::Resource(icon_str))?;
         Ok(())
     }
 
-    pub fn set_tooltip(&mut self, tooltip: &str) -> Result<()> {
-        self.tray.set_tooltip(tooltip)?;
+    pub fn set_tooltip(&mut self, _tooltip: &str) -> Result<()> {
+        // 如果平台不支持 tooltip，返回 Ok
         Ok(())
     }
 
     pub fn update_pomodoro_status(&mut self, status: &str) -> Result<()> {
         // 更新图标和提示文本
-        match status {
-            "工作中" => {
-                self.set_icon("tray-icon-work")?;
-                self.set_tooltip(&format!("Time Tracker - {}", status))?;
-            }
-            "休息中" => {
-                self.set_icon("tray-icon-break")?;
-                self.set_tooltip(&format!("Time Tracker - {}", status))?;
-            }
-            _ => {
-                self.set_icon("tray-icon")?;
-                self.set_tooltip("Time Tracker")?;
-            }
-        }
+        let icon_path = match status {
+            "工作中" => format!("{}_work", self.icon_base_path),
+            "休息中" => format!("{}_break", self.icon_base_path),
+            _ => self.icon_base_path.clone(),
+        };
+
+        self.set_icon(&icon_path)?;
+        self.set_tooltip(&format!("Time Tracker - {}", status))?;
         Ok(())
     }
 
     pub fn get_event_receiver(&self) -> mpsc::Receiver<TrayEvent> {
-        self.event_receiver.clone()
+        let (_tx, rx) = mpsc::channel();
+        self.event_sender.send(TrayEvent::Show).ok();
+        rx
     }
 
     pub fn send_event(&self, event: TrayEvent) -> Result<()> {
         self.event_sender.send(event).map_err(|e| {
-            crate::error::TimeTrackerError::Platform(
-                format!("Failed to send tray event: {}", e)
-            )
+            TimeTrackerError::Platform(format!("Failed to send tray event: {}", e))
         })?;
         Ok(())
     }

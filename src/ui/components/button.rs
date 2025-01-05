@@ -1,5 +1,5 @@
 use eframe::egui;
-use super::styles;
+use crate::ui::styles;
 
 pub struct Button {
     text: String,

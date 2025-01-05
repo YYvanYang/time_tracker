@@ -1,5 +1,5 @@
 use eframe::egui;
-use super::styles;
+use crate::ui::styles;
 
 pub struct Card {
     style: styles::CardStyle,
@@ -28,24 +28,51 @@ impl Card {
     }
 
     pub fn show<R>(
-        self,
+        &self,
         ui: &mut egui::Ui,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> Option<R> {
-        let Card { style: _, collapsible, title } = self;
-
-        if collapsible {
-            if let Some(title) = title {
+    ) -> egui::Response {
+        if self.collapsible {
+            if let Some(title) = &self.title {
                 egui::CollapsingHeader::new(title)
                     .default_open(true)
-                    .show(ui, add_contents)
-                    .body_returned
+                    .show(ui, |ui| {
+                        self.draw_card_contents(ui, &self.style, add_contents);
+                    })
+                    .header_response
             } else {
-                None
+                self.draw_frame(ui, &self.style, add_contents)
             }
         } else {
-            Some(add_contents(ui))
+            self.draw_frame(ui, &self.style, add_contents)
         }
+    }
+
+    fn draw_frame<R>(
+        &self,
+        ui: &mut egui::Ui,
+        style: &styles::CardStyle,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::Response {
+        egui::Frame::none()
+            .inner_margin(style.padding)
+            .rounding(style.rounding)
+            .fill(style.background)
+            .stroke(style.border)
+            .show(ui, |ui| {
+                self.draw_card_contents(ui, style, add_contents);
+            })
+            .response
+    }
+
+    fn draw_card_contents<R>(
+        &self,
+        ui: &mut egui::Ui,
+        style: &styles::CardStyle,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) {
+        ui.spacing_mut().item_spacing = style.spacing;
+        add_contents(ui);
     }
 }
 
