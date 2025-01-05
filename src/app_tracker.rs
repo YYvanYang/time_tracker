@@ -65,6 +65,7 @@ impl Default for AppUsageConfig {
     }
 }
 
+#[allow(dead_code)]
 pub struct AppTracker {
     config: AppUsageConfig,
     current_app: Arc<Mutex<Option<AppUsageData>>>,
