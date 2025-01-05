@@ -8,7 +8,7 @@ use crate::hotkeys::HotkeyManager;
 use crate::storage::models::Project;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
 use eframe::egui;
 

@@ -25,7 +25,6 @@ use crate::hotkeys::{HotkeyManager, HotkeyConfig};
 use crate::storage::app_state::AppStateManager;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use eframe::{self, egui};
 use egui::ViewportBuilder;
 use std::sync::mpsc;
@@ -63,7 +62,7 @@ async fn main() -> Result<()> {
     let app_tracker = Arc::new(std::sync::Mutex::new(app_tracker));
 
     // 初始化系统托盘
-    let (tray_sender, tray_receiver) = mpsc::channel();
+    let (tray_sender, _tray_receiver) = mpsc::channel();
     let icon_path = config.storage.data_dir.join("assets/icons/tray-icon.png");
     let tray_manager = TrayManager::new(icon_path, tray_sender)?;
     let tray_event_receiver = tray_manager.get_event_receiver();
