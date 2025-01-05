@@ -15,70 +15,70 @@ mod ui;
 use crate::error::{Result, TimeTrackerError};
 use crate::config::Config;
 use crate::logging::Logger;
+use crate::platform::PlatformInterface;
+use crate::app_state::AppStateManager;
+use crate::storage::Storage;
+use crate::app_tracker::AppTracker;
+use crate::pomodoro::PomodoroTimer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 初始化日志系统
-    let log_path = logging::get_default_log_path();
-    Logger::init(Some(log_path))
-        .map_err(|e| TimeTrackerError::Platform(e.to_string()))?;
-
-    log::info!("Starting Time Tracker application");
+    // 初始化平台特定功能
+    let platform = platform::init()?;
 
     // 加载配置
-    let config = match Config::load() {
-        Ok(config) => {
-            log::info!("Configuration loaded successfully");
-            config
-        }
-        Err(err) => {
-            log::warn!("Failed to load config: {}, using defaults", err);
-            Config::default()
-        }
-    };
+    let config = Config::load()?;
+    
+    // 初始化存储
+    let storage = Storage::new(&config.storage)?;
+    
+    // 初始化应用追踪器
+    let app_tracker = AppTracker::new()?;
+    
+    // 初始化番茄钟
+    let pomodoro = PomodoroTimer::new(config.pomodoro.clone(), Default::default())?;
+    
+    // 初始化状态管理器
+    let state_manager = AppStateManager::new(config.storage.data_dir.clone(), true)?;
 
     // 创建应用实例
-    let app = ui::TimeTrackerApp::new(config);
+    let app = ui::TimeTrackerApp::new(
+        config,
+        storage,
+        app_tracker,
+        pomodoro,
+        state_manager,
+    );
 
     // 运行应用
-    let native_options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(
-            app.config.ui.window_width as f32,
-            app.config.ui.window_height as f32
-        )),
-        resizable: true,
-        vsync: true,
-        multisampling: 0,
-        depth_buffer: 0,
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_resizable(true),
         ..Default::default()
     };
 
-    log::info!("Starting GUI");
     eframe::run_native(
         "Time Tracker",
-        native_options,
+        options,
         Box::new(|cc| {
-            // 设置自定义字体
             setup_custom_fonts(&cc.egui_ctx);
             Box::new(app)
         }),
-    )
-    .map_err(|e| TimeTrackerError::Gui(e.to_string()))?;
+    ).map_err(|e| TimeTrackerError::Gui(e.to_string()))?;
 
-    log::info!("Application terminated normally");
     Ok(())
 }
 
 fn setup_custom_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     
-    // 添加自定义字体（这里使用系统字体，实际应用中可以打包字体文件）
+    // 使用系统默认字体
     fonts.font_data.insert(
         "main_font".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/OpenSans-Regular.ttf")), // 临时使用内置字体
     );
 
-    // 设置字体
     fonts.families
         .get_mut(&egui::FontFamily::Proportional)
         .unwrap()

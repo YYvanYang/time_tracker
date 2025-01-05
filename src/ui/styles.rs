@@ -40,6 +40,7 @@ pub fn monospace() -> TextStyle {
 }
 
 // 按钮样式
+#[derive(Debug, Clone)]
 pub struct ButtonStyle {
     pub background: Color32,
     pub foreground: Color32,
@@ -171,7 +172,10 @@ pub fn format_text(text: &str, style: TextStyle, color: Option<Color32>) -> Rich
 }
 
 // 布局辅助函数
-pub fn centered_row<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub fn centered_row<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
     ui.with_layout(
         egui::Layout::left_to_right(egui::Align::Center)
             .with_cross_align(egui::Align::Center),
@@ -179,7 +183,10 @@ pub fn centered_row<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::U
     )
 }
 
-pub fn centered_column<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub fn centered_column<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
     ui.with_layout(
         egui::Layout::top_down(egui::Align::Center)
             .with_cross_align(egui::Align::Center),

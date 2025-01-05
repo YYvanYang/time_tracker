@@ -2,7 +2,7 @@
 
 use super::models::*;
 use crate::error::{Result, TimeTrackerError};
-use chrono::{DateTime, Local, NaiveDateTime, Timelike};
+use chrono::{DateTime, Local, NaiveDateTime, Timelike, Datelike};
 use rusqlite::{params, Connection, Row, Statement};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -142,8 +142,8 @@ impl<'a, T: FromRow> QueryBuilder<'a, T> {
     }
 
     pub fn execute(&self) -> Result<Vec<T>> {
-        let query = self.build_query();
-        let mut stmt = self.conn.prepare(&query)?;
+        let conn = self.conn;
+        let mut stmt = conn.prepare(&self.build_query())?;
         
         let params: Vec<&dyn rusqlite::ToSql> = self.params
             .iter()
@@ -151,13 +151,12 @@ impl<'a, T: FromRow> QueryBuilder<'a, T> {
             .collect();
 
         let rows = stmt.query_map(params.as_slice(), |row| T::from_row(row))?;
-
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| TimeTrackerError::Database(e.to_string()))
+            .map_err(TimeTrackerError::Database)
     }
 
     pub fn execute_one(&self) -> Result<Option<T>> {
-        let mut results = self.limit(1).execute()?;
+        let mut results = self.execute()?;
         Ok(results.pop())
     }
 }

@@ -83,35 +83,45 @@ pub struct PomodoroTimer {
     callbacks: PomodoroCallbacks,
 }
 
-#[derive(Clone)]
 pub struct PomodoroCallbacks {
-    pub on_complete: Arc<dyn Fn() + Send + Sync>,
-    pub on_break: Arc<dyn Fn() + Send + Sync>,
     pub on_tick: Arc<dyn Fn(Duration) + Send + Sync>,
-    pub on_state_change: Arc<dyn Fn(PomodoroState) + Send + Sync>,
+    pub on_complete: Arc<dyn Fn() + Send + Sync>,
+    pub on_pause: Arc<dyn Fn() + Send + Sync>,
+    pub on_resume: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl Default for PomodoroCallbacks {
     fn default() -> Self {
         Self {
-            on_complete: Arc::new(|| {}),
-            on_break: Arc::new(|| {}),
             on_tick: Arc::new(|_| {}),
-            on_state_change: Arc::new(|_| {}),
+            on_complete: Arc::new(|| {}),
+            on_pause: Arc::new(|| {}),
+            on_resume: Arc::new(|| {}),
         }
+    }
+}
+
+impl std::fmt::Debug for PomodoroCallbacks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PomodoroCallbacks")
+            .field("on_tick", &"<callback>")
+            .field("on_complete", &"<callback>")
+            .field("on_pause", &"<callback>")
+            .field("on_resume", &"<callback>")
+            .finish()
     }
 }
 
 impl PomodoroTimer {
     pub fn new(config: PomodoroConfig, callbacks: PomodoroCallbacks) -> Self {
         Self {
-            config,
+            config: config.clone(),
+            callbacks,
             state: PomodoroState::Idle,
             start_time: None,
             remaining_time: config.work_duration,
             completed_count: 0,
             stats: Arc::new(Mutex::new(PomodoroStats::default())),
-            callbacks,
         }
     }
 
@@ -121,7 +131,6 @@ impl PomodoroTimer {
                 self.state = PomodoroState::Working;
                 self.remaining_time = self.config.work_duration;
                 self.start_time = Some(Instant::now());
-                (self.callbacks.on_state_change)(self.state.clone());
             }
             PomodoroState::Paused(ref prev_state) => {
                 self.state = match prev_state {
@@ -130,7 +139,6 @@ impl PomodoroTimer {
                     PreviousState::LongBreak => PomodoroState::LongBreak,
                 };
                 self.start_time = Some(Instant::now());
-                (self.callbacks.on_state_change)(self.state.clone());
             }
             _ => {
                 return Err(TimeTrackerError::Platform(
@@ -164,7 +172,6 @@ impl PomodoroTimer {
                 ));
             }
         }
-        (self.callbacks.on_state_change)(self.state.clone());
         Ok(())
     }
 
@@ -179,7 +186,6 @@ impl PomodoroTimer {
                 self.start_time = None;
             }
         }
-        (self.callbacks.on_state_change)(self.state.clone());
         Ok(())
     }
 
@@ -192,8 +198,7 @@ impl PomodoroTimer {
                         self.handle_completion()?;
                     } else {
                         self.remaining_time = self.remaining_time.saturating_sub(elapsed);
-                        let callbacks = self.callbacks.clone();
-                        callbacks.on_tick(self.remaining_time);
+                        (self.callbacks.on_tick)(self.remaining_time);
                     }
                 }
             }
@@ -267,7 +272,7 @@ impl PomodoroTimer {
                 };
                 self.remaining_time = self.config.work_duration;
 
-                (self.callbacks.on_break)();
+                (self.callbacks.on_complete)();
             }
             _ => {}
         }
@@ -278,7 +283,6 @@ impl PomodoroTimer {
             None
         };
 
-        (self.callbacks.on_state_change)(self.state.clone());
         Ok(())
     }
 
@@ -357,7 +361,9 @@ mod tests {
             on_complete: Arc::new(move || {
                 completed_count.fetch_add(1, Ordering::SeqCst);
             }),
-            ..PomodoroCallbacks::default()
+            on_tick: Arc::new(|_| {}),
+            on_pause: Arc::new(|| {}),
+            on_resume: Arc::new(|| {}),
         };
 
         PomodoroTimer::new(config, callbacks)

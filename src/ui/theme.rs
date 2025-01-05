@@ -2,6 +2,7 @@
 
 use crate::config::{Config, Theme as AppTheme};
 use eframe::egui::{self, Color32, Rounding, Stroke, Style, Visuals};
+use crate::ui::TimeTrackerApp;
 
 pub const SPACING: f32 = 8.0;
 pub const PADDING: f32 = 6.0;
@@ -25,7 +26,8 @@ pub const DARK_ERROR: Color32 = Color32::from_rgb(255, 82, 82);
 pub const DARK_TEXT: Color32 = Color32::from_rgb(255, 255, 255);
 pub const DARK_TEXT_SECONDARY: Color32 = Color32::from_rgb(189, 189, 189);
 
-pub fn apply_theme(ctx: &egui::Context, config: &Config) {
+pub fn apply_theme(ctx: &egui::Context, app: &TimeTrackerApp) {
+    let config = app.get_config();
     let visuals = match config.ui.theme {
         AppTheme::Light => light_theme(),
         AppTheme::Dark => dark_theme(),
@@ -52,6 +54,7 @@ fn light_theme() -> Visuals {
         override_text_color: Some(LIGHT_TEXT),
         widgets: egui::style::Widgets {
             noninteractive: egui::style::WidgetVisuals {
+                weak_bg_fill: LIGHT_SURFACE.linear_multiply(0.7),
                 bg_fill: LIGHT_SURFACE,
                 bg_stroke: Stroke::new(1.0, LIGHT_TEXT_SECONDARY),
                 fg_stroke: Stroke::new(1.0, LIGHT_TEXT),
@@ -59,6 +62,7 @@ fn light_theme() -> Visuals {
                 expansion: 0.0,
             },
             inactive: egui::style::WidgetVisuals {
+                weak_bg_fill: LIGHT_SURFACE.linear_multiply(0.7),
                 bg_fill: LIGHT_SURFACE,
                 bg_stroke: Stroke::new(1.0, LIGHT_PRIMARY),
                 fg_stroke: Stroke::new(1.0, LIGHT_TEXT),
@@ -146,16 +150,14 @@ fn dark_theme() -> Visuals {
 
 #[cfg(target_os = "windows")]
 fn is_dark_mode_enabled() -> bool {
-    use winreg::enums::*;
+    use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
 
-    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER) {
-        if let Ok(personalize) = hkcu.open_subkey(
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
-        ) {
-            if let Ok(dark_mode) = personalize.get_value::<u32, _>("AppsUseLightTheme") {
-                return dark_mode == 0;
-            }
+    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+    ) {
+        if let Ok(dark_mode) = hkcu.get_value::<u32, _>("AppsUseLightTheme") {
+            return dark_mode == 0;
         }
     }
     false

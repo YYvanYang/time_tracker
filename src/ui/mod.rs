@@ -15,9 +15,12 @@ use components::*;
 use eframe::egui;
 use std::sync::Arc;
 use views::*;
+use crate::ui::components::Dialog;
+use crate::ui::components::dialog::{ProjectDialog, TagDialog, ExportDialog, SettingsDialog, ConfirmationDialog};
+use parking_lot::Mutex;
 
 pub struct TimeTrackerApp {
-    config: Arc<Config>,
+    config: Arc<Mutex<Config>>,
     storage: Arc<Storage>,
     app_tracker: Arc<AppTracker>,
     pomodoro: Arc<PomodoroTimer>,
@@ -57,7 +60,7 @@ impl TimeTrackerApp {
         state_manager: AppStateManager,
     ) -> Self {
         Self {
-            config: Arc::new(config),
+            config: Arc::new(Mutex::new(config)),
             storage: Arc::new(storage),
             app_tracker: Arc::new(app_tracker),
             pomodoro: Arc::new(pomodoro),
@@ -99,6 +102,28 @@ impl TimeTrackerApp {
             on_cancel: None,
         }));
     }
+
+    pub fn show_confirmation_dialog(&mut self, title: String, message: String, on_confirm: Box<dyn FnOnce()>) {
+        self.push_dialog(Dialog::Confirmation(ConfirmationDialog {
+            title,
+            message,
+            on_confirm: Some(Box::new(move |_| {
+                on_confirm();
+                Ok(())
+            })),
+            on_cancel: None,
+        }));
+    }
+
+    pub fn save_config(&mut self) -> Result<()> {
+        let config = self.config.lock();
+        config.save()?;
+        Ok(())
+    }
+
+    pub fn get_config(&self) -> parking_lot::MutexGuard<Config> {
+        self.config.lock()
+    }
 }
 
 impl eframe::App for TimeTrackerApp {
@@ -110,7 +135,7 @@ impl eframe::App for TimeTrackerApp {
         self.show_top_panel(ctx);
 
         // 显示侧边栏（如果不是紧凑模式）
-        if !self.config.ui.compact_mode {
+        if !self.config.lock().ui.compact_mode {
             self.show_sidebar(ctx);
         }
 
@@ -262,25 +287,25 @@ impl TimeTrackerApp {
     }
 
     fn show_dialogs(&mut self, ctx: &egui::Context) {
-        let dialog = self.dialog_stack.last_mut().unwrap();
-        match dialog {
-            Dialog::AddProject(dialog) => {
-                dialog.show(ctx, self);
-            }
-            Dialog::EditProject(dialog) => {
-                dialog.show(ctx, self);
-            }
-            Dialog::AddTag(dialog) => {
-                dialog.show(ctx, self);
-            }
-            Dialog::Export(dialog) => {
-                dialog.show(ctx, self);
-            }
-            Dialog::Settings(dialog) => {
-                dialog.show(ctx, self);
-            }
-            Dialog::Confirmation(dialog) => {
-                dialog.show(ctx, self);
+        use crate::ui::components::dialog::Dialog;
+        
+        if let Some(dialog) = self.dialog_stack.last_mut() {
+            match dialog {
+                Dialog::Project(dialog) => {
+                    dialog.show(ctx, self);
+                }
+                Dialog::Tag(dialog) => {
+                    dialog.show(ctx, self);
+                }
+                Dialog::Export(dialog) => {
+                    dialog.show(ctx, self);
+                }
+                Dialog::Settings(dialog) => {
+                    dialog.show(ctx, self);
+                }
+                Dialog::Confirmation(dialog) => {
+                    dialog.show(ctx, self);
+                }
             }
         }
     }
@@ -340,7 +365,23 @@ mod tests {
         app.current_view = View::Statistics;
         assert_eq!(app.current_view, View::Statistics);
     }
-}test_app();
+
+    #[test]
+    fn test_error_management() {
+        let (mut app, _temp_dir) = create_test_app();
+
+        assert!(app.error.is_none());
+
+        app.show_error("Test error".to_string());
+        assert_eq!(app.error, Some("Test error".to_string()));
+
+        app.clear_error();
+        assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn test_view_switching() {
+        let (mut app, _temp_dir) = create_test_app();
 
         // 测试对话框堆栈
         assert!(app.dialog_stack.is_empty());
@@ -358,20 +399,4 @@ mod tests {
         assert!(matches!(dialog, Some(Dialog::Confirmation(_))));
         assert!(app.dialog_stack.is_empty());
     }
-
-    #[test]
-    fn test_error_management() {
-        let (mut app, _temp_dir) = create_test_app();
-
-        assert!(app.error.is_none());
-
-        app.show_error("Test error".to_string());
-        assert_eq!(app.error, Some("Test error".to_string()));
-
-        app.clear_error();
-        assert!(app.error.is_none());
-    }
-
-    #[test]
-    fn test_view_switching() {
-        let (mut app, _temp_dir) = create_
+}

@@ -16,14 +16,12 @@ pub struct AppUsageData {
     pub category: AppCategory,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub enum AppCategory {
     Development,
-    Office,
-    Browser,
     Communication,
+    Productivity,
     Entertainment,
-    System,
     Other,
 }
 
@@ -41,10 +39,10 @@ impl Default for AppUsageConfig {
         let mut category_rules = HashMap::new();
         category_rules.insert("code".to_string(), AppCategory::Development);
         category_rules.insert("visual studio".to_string(), AppCategory::Development);
-        category_rules.insert("chrome".to_string(), AppCategory::Browser);
-        category_rules.insert("firefox".to_string(), AppCategory::Browser);
-        category_rules.insert("word".to_string(), AppCategory::Office);
-        category_rules.insert("excel".to_string(), AppCategory::Office);
+        category_rules.insert("chrome".to_string(), AppCategory::Productivity);
+        category_rules.insert("firefox".to_string(), AppCategory::Productivity);
+        category_rules.insert("word".to_string(), AppCategory::Productivity);
+        category_rules.insert("excel".to_string(), AppCategory::Productivity);
         category_rules.insert("slack".to_string(), AppCategory::Communication);
         category_rules.insert("teams".to_string(), AppCategory::Communication);
 
@@ -60,7 +58,7 @@ impl Default for AppUsageConfig {
                 "youtube".to_string(),
             ],
             tracking_interval: std::time::Duration::from_secs(30),
-            idle_threshold: std::time::Duration::from_secs(300), // 5分钟
+            idle_threshold: std::time::Duration::from_secs(300),
             category_rules,
         }
     }
@@ -72,6 +70,7 @@ pub struct AppTracker {
     last_check: Instant,
     storage: Arc<Mutex<Vec<AppUsageData>>>,
     last_active: Instant,
+    platform: Option<Box<dyn PlatformOperations>>,
 }
 
 impl AppTracker {
@@ -82,6 +81,7 @@ impl AppTracker {
             last_check: Instant::now(),
             storage: Arc::new(Mutex::new(Vec::new())),
             last_active: Instant::now(),
+            platform: None,
         }
     }
 
@@ -91,29 +91,12 @@ impl AppTracker {
             return Ok(());
         }
 
-        // 获取当前活动窗口信息
-        if let Some(window_info) = PlatformOperations::get_active_window_info() {
-            // 检查是否空闲
-            if now.duration_since(self.last_active) > self.config.idle_threshold {
-                self.handle_idle_period()?;
-                return Ok(());
-            }
-
-            // 处理应用切换
-            match &self.current_app {
-                Some(current) if current.app_name == window_info.app_name 
-                    && current.window_title == window_info.window_title => {
-                    // 同一个应用，更新持续时间
-                    self.update_current_app_duration()?;
-                }
-                _ => {
-                    // 不同的应用，保存当前应用记录并创建新记录
-                    self.switch_to_new_app(window_info)?;
-                }
+        if let Some(platform) = &self.platform {
+            if let Ok(window_info) = platform.get_active_window() {
+                self.switch_to_new_app(window_info)?;
             }
         }
 
-        self.last_check = now;
         Ok(())
     }
 
@@ -135,7 +118,7 @@ impl AppTracker {
         Ok(())
     }
 
-    fn switch_to_new_app(&mut self, window_info: crate::platform::WindowInfo) -> Result<()> {
+    fn switch_to_new_app(&mut self, mut window_info: crate::platform::WindowInfo) -> Result<()> {
         // 保存之前的应用记录
         if let Some(current_app) = self.current_app.take() {
             self.storage.lock()
@@ -143,14 +126,18 @@ impl AppTracker {
                 .push(current_app);
         }
 
+        let app_name = window_info.app_name.clone();
+        let is_productive = self.is_productive(&app_name);
+        let category = self.get_app_category(&app_name);
+
         // 创建新的应用记录
         self.current_app = Some(AppUsageData {
-            app_name: window_info.app_name,
+            app_name,
             window_title: window_info.window_title,
             start_time: Local::now(),
             duration: std::time::Duration::from_secs(0),
-            is_productive: self.is_productive(&window_info.app_name),
-            category: self.get_app_category(&window_info.app_name),
+            is_productive,
+            category,
         });
 
         self.last_active = Instant::now();
@@ -260,7 +247,7 @@ mod tests {
         let tracker = AppTracker::new(config);
 
         assert_eq!(tracker.get_app_category("Visual Studio Code"), AppCategory::Development);
-        assert_eq!(tracker.get_app_category("Microsoft Excel"), AppCategory::Office);
+        assert_eq!(tracker.get_app_category("Microsoft Excel"), AppCategory::Productivity);
         assert_eq!(tracker.get_app_category("Unknown App"), AppCategory::Other);
     }
 

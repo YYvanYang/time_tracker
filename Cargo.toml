@@ -60,17 +60,28 @@ lru = "0.12"
 # 通知
 notify-rust = "4.8"
 
+# 文件对话框
+rfd = "0.11"
+
 # Windows特定依赖
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.48", features = [
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_Foundation",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Threading",
-    "Win32_System_Registry",
-    "Win32_System_Shutdown",
-    "Win32_System_SystemServices"
-]}
+winapi = { version = "0.3", features = [
+    "winuser",
+    "processthreadsapi",
+    "winbase",
+    "handleapi",
+    "errhandlingapi",
+    "winerror",
+    "shellapi",
+    "commctrl",
+    "wincon",
+    "fileapi",
+    "winreg",
+] }
+
+# Windows注册表
+[target.'cfg(windows)'.dependencies]
+winreg = "0.11"
 
 # macOS特定依赖
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -88,14 +99,3 @@ tempfile = "3.8"
 test-log = "0.2"
 pretty_assertions = "1.4"
 mockall = "0.12" # 用于mock测试
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = 'abort'
-strip = true
-
-[features]
-default = []
-profiling = ["tracing"]

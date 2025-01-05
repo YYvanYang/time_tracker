@@ -1,5 +1,3 @@
-// src/storage/app_state.rs
-
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -37,10 +35,4 @@ impl AppStateManager {
             auto_save,
         })
     }
-
-    pub fn save(&self) -> Result<()> {
-        let contents = serde_json::to_string_pretty(&self.state)?;
-        std::fs::write(&self.file_path, contents)?;
-        Ok(())
-    }
-}
+} 

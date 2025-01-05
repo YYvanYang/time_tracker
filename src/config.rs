@@ -175,13 +175,9 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        self.validate()?;
-        let config_path = Self::get_config_path()?;
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let contents = serde_json::to_string_pretty(self)?;
-        fs::write(&config_path, contents)?;
+        let contents = serde_json::to_string_pretty(self)
+            .map_err(|e| TimeTrackerError::Json(e))?;
+        std::fs::write(&Config::get_config_path()?, contents)?;
         Ok(())
     }
 
@@ -253,17 +249,18 @@ impl Config {
     }
 
     pub fn watch_changes(&self) -> Result<()> {
-        let config_path = Self::get_config_path()?;
+        let config_path = Config::get_config_path()?;
         let (tx, rx) = channel();
 
         let mut watcher = watcher(tx, Duration::from_secs(2))?;
         watcher.watch(config_path, RecursiveMode::NonRecursive)?;
 
+        let mut config = self.clone();
         std::thread::spawn(move || {
             for result in rx {
                 match result {
-                    Ok(event) => {
-                        if let Err(e) = Self::reload() {
+                    Ok(_) => {
+                        if let Err(e) = config.reload() {
                             log::error!("Failed to reload config: {}", e);
                         }
                     }
@@ -273,6 +270,15 @@ impl Config {
         });
 
         Ok(())
+    }
+
+    pub fn reload(&mut self) -> Result<()> {
+        if let Ok(new_config) = Self::load() {
+            *self = new_config;
+            Ok(())
+        } else {
+            Err(TimeTrackerError::Config("Failed to reload config".into()))
+        }
     }
 }
 

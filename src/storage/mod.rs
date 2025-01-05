@@ -262,6 +262,55 @@ impl Storage {
         conn.close().map_err(|e| TimeTrackerError::Storage(e.to_string()))?;
         Ok(())
     }
+
+    pub fn backup(&self) -> Result<()> {
+        let mut conn = self.conn.lock();
+        
+        let backup_dir = self.config.data_dir.join("backups");
+        std::fs::create_dir_all(&backup_dir)?;
+
+        let backup_path = backup_dir.join(format!(
+            "backup_{}.db",
+            Local::now().format("%Y%m%d_%H%M%S")
+        ));
+
+        let backup_conn = rusqlite::Connection::open(&backup_path)?;
+        rusqlite::backup::Backup::new(&*conn, &backup_conn)?.step(-1)?;
+
+        Ok(())
+    }
+
+    pub fn list_backups(&self) -> Result<Vec<PathBuf>> {
+        let backup_dir = self.config.data_dir.join("backups");
+        if !backup_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let entries = std::fs::read_dir(&backup_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext == "db")
+                    .unwrap_or(false)
+            })
+            .map(|e| e.path())
+            .collect();
+
+        Ok(entries)
+    }
+
+    pub fn execute_transaction<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&rusqlite::Transaction) -> Result<T>,
+    {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
 }
 
 #[derive(Debug)]

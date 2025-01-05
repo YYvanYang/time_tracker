@@ -6,6 +6,8 @@ use crate::ui::TimeTrackerApp;
 use eframe::egui;
 use chrono::{Local, NaiveDateTime, Timelike, Datelike};
 use std::time::Duration;
+use crate::storage::PomodoroStatus;
+use crate::pomodoro::PomodoroStats as CorePomodoroStats;
 
 pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(styles::SPACING_LARGE, styles::SPACING_LARGE);
@@ -152,115 +154,40 @@ fn render_pomodoro_controls(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
 }
 
 fn render_pomodoro_stats(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
-    ui.heading("今日统计");
-
     if let Ok(stats) = app.pomodoro.get_stats() {
-        ui.horizontal(|ui| {
-            Card::new()
-                .show(ui, |ui| {
-                    ui.label("完成番茄数");
-                    ui.heading(format!("{}", stats.completed));
-                });
-
-            Card::new()
-                .show(ui, |ui| {
-                    ui.label("专注时间");
-                    ui.heading(format_duration(stats.total_work_time));
-                });
-
-            Card::new()
-                .show(ui, |ui| {
-                    ui.label("最长专注");
-                    ui.heading(format_duration(stats.longest_focus));
-                });
-        });
-
-        // 显示完成记录
-        ui.add_space(styles::SPACING_MEDIUM);
-        ui.heading("完成记录");
-
-        let mut records = stats.records;
-        records.sort_by(|a, b| b.end_time.cmp(&a.end_time));
-
-        egui::ScrollArea::vertical()
-            .max_height(300.0)
+        Card::new()
+            .with_style(styles::CardStyle::elevated())
             .show(ui, |ui| {
-                for record in records {
-                    Card::new()
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                let time_str = record.end_time.format("%H:%M").to_string();
-                                match record.status {
-                                    crate::pomodoro::PomodoroStatus::Completed => {
-                                        ui.colored_label(
-                                            styles::COLOR_SUCCESS,
-                                            format!("✓ {}", time_str),
-                                        );
-                                    }
-                                    crate::pomodoro::PomodoroStatus::Interrupted => {
-                                        ui.colored_label(
-                                            styles::COLOR_ERROR,
-                                            format!("✗ {}", time_str),
-                                        );
-                                    }
-                                }
+                ui.heading("统计");
+                ui.add_space(styles::SPACING_SMALL);
 
-                                if let Some(project) = record.project {
-                                    Tag::new(&project)
-                                        .with_color(styles::COLOR_PRIMARY)
-                                        .show(ui);
-                                }
+                // 显示完成数量
+                ui.heading(format!("{}", stats.total_completed));
+                ui.label("已完成番茄钟");
 
-                                // 显示标签
-                                for tag in &record.tags {
-                                    Tag::new(tag)
-                                        .with_color(styles::COLOR_SECONDARY)
-                                        .show(ui);
-                                }
-                            });
+                ui.add_space(styles::SPACING_MEDIUM);
 
-                            // 显示笔记
-                            if let Some(note) = record.notes {
-                                ui.add_space(styles::SPACING_SMALL);
-                                ui.label(styles::format_text(
-                                    &note,
-                                    styles::small(),
-                                    Some(styles::COLOR_TEXT_SECONDARY),
-                                ));
-                            }
-                        });
-                }
+                // 显示专注时长
+                ui.heading(format_duration(stats.total_work_time));
+                ui.label("总专注时长");
+
+                // 显示最长专注时间
+                ui.heading(format_duration(Duration::from_secs(stats.longest_streak as u64)));
+                ui.label("最长专注时间");
+
+                // 显示历史记录
+                ui.add_space(styles::SPACING_LARGE);
+                ui.heading("历史记录");
+                
+                let daily_records = stats.daily_completed.iter()
+                    .map(|(date, count)| (date.hour() as f64, *count as f64))
+                    .collect::<Vec<_>>();
+
+                Chart::new(daily_records)
+                    .with_size(ui.available_width(), 150.0)
+                    .with_color(styles::COLOR_PRIMARY)
+                    .show(ui);
             });
-
-        // 显示趋势图
-        ui.add_space(styles::SPACING_MEDIUM);
-        ui.heading("专注趋势");
-        
-        let chart_data = stats.daily_completed
-            .iter()
-            .map(|(date, count)| (*date.hour() as f64, *count as f64))
-            .collect::<Vec<_>>();
-
-        Chart::new(chart_data)
-            .with_size(ui.available_width(), 150.0)
-            .with_color(styles::COLOR_PRIMARY)
-            .show(ui);
-
-        // 显示建议
-        if let Some(suggestion) = get_productivity_suggestion(&stats) {
-            ui.add_space(styles::SPACING_MEDIUM);
-            Card::new()
-                .with_style(styles::CardStyle::default())
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("💡");
-                        ui.colored_label(
-                            styles::COLOR_INFO,
-                            suggestion,
-                        );
-                    });
-                });
-        }
     }
 }
 
@@ -274,12 +201,12 @@ fn format_duration(duration: Duration) -> String {
     }
 }
 
-fn get_productivity_suggestion(stats: &PomodoroStats) -> Option<String> {
-    // 分析数据，生成建议
-    if stats.completed == 0 {
+fn get_productivity_suggestion(stats: &CorePomodoroStats) -> Option<String> {
+    if stats.total_completed == 0 {
         Some("开始你的第一个番茄钟吧！".to_string())
     } else {
-        let completion_rate = stats.completed as f32 / (stats.completed + stats.interrupted) as f32;
+        let completion_rate = stats.total_completed as f32 / 
+            (stats.total_completed + stats.total_interrupted) as f32;
         
         if completion_rate < 0.5 {
             Some("提示：尝试将手机调至勿扰模式，减少干扰。".to_string())
@@ -294,7 +221,7 @@ fn get_productivity_suggestion(stats: &PomodoroStats) -> Option<String> {
     }
 }
 
-fn find_most_productive_hour(stats: &PomodoroStats) -> Option<u32> {
+fn find_most_productive_hour(stats: &CorePomodoroStats) -> Option<u32> {
     let mut hourly_completion = vec![0; 24];
     for (date, count) in &stats.daily_completed {
         hourly_completion[date.hour() as usize] += count;

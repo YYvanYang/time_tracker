@@ -4,6 +4,10 @@ use crate::error::Result;
 use std::sync::mpsc;
 use tray_item::{IconSource, TrayItem};
 
+#[cfg(target_os = "windows")]
+use winapi::um::winuser;
+use winapi::shared::windef::HWND;
+
 pub enum TrayEvent {
     Show,
     Hide,

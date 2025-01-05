@@ -3,19 +3,19 @@
 mod button;
 mod card;
 mod chart;
-mod dialog;
+pub mod dialog;
 mod input;
 mod progress;
 
-pub use button::*;
-pub use card::*;
-pub use chart::*;
-pub use dialog::*;
-pub use input::*;
-pub use progress::*;
+pub use button::Button;
+pub use card::Card;
+pub use chart::Chart;
+pub use dialog::Dialog;
+pub use input::Input;
+pub use progress::Progress;
 
 use crate::error::Result;
-use eframe::egui;
+use eframe::egui::{self, Color32};
 use super::styles;
 
 // 按钮组件
