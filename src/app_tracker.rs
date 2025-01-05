@@ -221,7 +221,7 @@ impl AppTracker {
     }
 
     pub fn record_window(&mut self, window_info: PlatformWindowInfo) -> Result<()> {
-        let record = AppUsageRecord {
+        let _record = AppUsageRecord {
             id: None,
             app_name: window_info.app_name.clone(),
             window_title: window_info.title,
@@ -230,7 +230,6 @@ impl AppTracker {
             category: String::new(),
             is_productive: self.is_productive(&window_info.app_name),
         };
-        // ... 保存记录到存储
         Ok(())
     }
 
@@ -301,7 +300,7 @@ mod tests {
     #[test]
     fn test_app_category_detection() {
         let config = AppUsageConfig::default();
-        let tracker = AppTracker::new(config);
+        let tracker = AppTracker::new(config).expect("Failed to create AppTracker");
 
         assert_eq!(tracker.get_app_category("Visual Studio Code"), AppCategory::Development);
         assert_eq!(tracker.get_app_category("Microsoft Excel"), AppCategory::Productivity);
@@ -311,7 +310,7 @@ mod tests {
     #[test]
     fn test_productivity_detection() {
         let config = AppUsageConfig::default();
-        let tracker = AppTracker::new(config);
+        let tracker = AppTracker::new(config).expect("Failed to create AppTracker");
 
         assert!(tracker.is_productive("Visual Studio Code"));
         assert!(!tracker.is_productive("YouTube"));
@@ -320,12 +319,14 @@ mod tests {
     #[test]
     fn test_usage_stats() -> Result<()> {
         let config = AppUsageConfig::default();
-        let mut tracker = AppTracker::new(config);
+        let mut tracker = AppTracker::new(config).expect("Failed to create AppTracker");
 
         // 模拟应用使用
         let window_info = crate::platform::WindowInfo {
             app_name: "Visual Studio Code".to_string(),
+            title: "main.rs".to_string(),
             window_title: "main.rs".to_string(),
+            process_name: "code.exe".to_string(),
             process_id: 1234,
         };
 
@@ -333,7 +334,7 @@ mod tests {
         std::thread::sleep(Duration::from_secs(1));
         tracker.update()?;
 
-        let stats = tracker.get_usage_stats(Local::now() - Duration::hours(1))?;
+        let stats = tracker.get_usage_stats(Local::now() - chrono::Duration::hours(1))?;
         assert!(stats.productive_time > Duration::from_secs(0));
         assert_eq!(stats.most_used_app, Some("Visual Studio Code".to_string()));
 

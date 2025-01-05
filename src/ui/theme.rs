@@ -164,12 +164,12 @@ mod tests {
         // 测试亮色主题
         let mut config = Config::default();
         config.ui.theme = AppTheme::Light;
-        apply_theme(&ctx, &config);
+        apply_theme(&ctx, matches!(config.ui.theme, AppTheme::Dark));
         assert!(!ctx.style().visuals.dark_mode);
 
         // 测试暗色主题
         config.ui.theme = AppTheme::Dark;
-        apply_theme(&ctx, &config);
+        apply_theme(&ctx, matches!(config.ui.theme, AppTheme::Dark));
         assert!(ctx.style().visuals.dark_mode);
     }
 

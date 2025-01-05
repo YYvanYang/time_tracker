@@ -1,6 +1,4 @@
-// src/storage/app_state.rs
-
-use crate::error::Result;
+use crate::error::{Result, TimeTrackerError};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -37,7 +35,18 @@ impl AppStateManager {
 
     pub fn save_state(&mut self) -> Result<()> {
         let state = self.state.lock().unwrap();
-        // TODO: 实现保存状态的逻辑
+        
+        // 将状态序列化为 JSON
+        let state_json = serde_json::to_string(&*state)?;
+        
+        // 确保目录存在
+        if let Some(parent) = self.file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        // 写入文件
+        std::fs::write(&self.file_path, state_json)?;
+        
         Ok(())
     }
 

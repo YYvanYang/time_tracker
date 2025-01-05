@@ -1,5 +1,3 @@
-// src/ui/mod.rs
-
 mod components;
 mod views;
 mod styles;
@@ -14,7 +12,6 @@ use crate::pomodoro::PomodoroTimer;
 use crate::storage::app_state::AppStateManager;
 use crate::tray::{TrayManager, TrayEvent};
 use crate::hotkeys::HotkeyManager;
-use components::*;
 use eframe::egui;
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 use views::*;
@@ -232,8 +229,8 @@ impl eframe::App for TimeTrackerApp {
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
         // 保存窗口状态
-        if let Ok(state) = self.state_manager.get_state() {
-            if let Err(e) = self.state_manager.save() {
+        if let Ok(mut state_manager) = self.app_state_manager.lock() {
+            if let Err(e) = state_manager.save_state() {
                 log::error!("Failed to save app state: {}", e);
             }
         }
@@ -251,7 +248,11 @@ impl TimeTrackerApp {
                         ui.close_menu();
                     }
                     if ui.button("设置").clicked() {
-                        self.push_dialog(Box::new(SettingsDialog::new(&self.config)));
+                        let config = {
+                            let config_guard = self.config.lock().unwrap();
+                            SettingsDialog::new(&*config_guard)
+                        };
+                        self.push_dialog(Box::new(config));
                         ui.close_menu();
                     }
                 });
@@ -343,17 +344,29 @@ impl TimeTrackerApp {
 
     fn show_dialogs(&mut self, ctx: &egui::Context) {
         let mut dialog_closed = false;
+        
+        // 先克隆需要的数据
+        let config = self.config.clone();
+        let app_state_manager = self.app_state_manager.clone();
+        let storage = self.storage.clone();
+        
         if let Some(dialog) = self.ui_state.dialog_stack.last_mut() {
+            let config_guard = config.lock().unwrap();
+            let state_manager_guard = app_state_manager.lock().unwrap();
+            let state = state_manager_guard.get_state().unwrap();
+            let storage_guard = storage.lock().unwrap();
+            
             let mut dialog_context = DialogContext {
-                config: self.config.lock().unwrap(),
-                state: self.app_state_manager.lock().unwrap().get_state().unwrap(),
-                storage: self.storage.lock().unwrap(),
+                config: &*config_guard,
+                state: &state,
+                storage: &*storage_guard,
             };
 
             if !dialog.show(ctx, &mut dialog_context) {
                 dialog_closed = true;
             }
         }
+        
         if dialog_closed {
             self.ui_state.dialog_stack.pop();
         }
@@ -378,10 +391,15 @@ impl TimeTrackerApp {
             None => return,
         };
 
+        let config_guard = self.config.lock().unwrap();
+        let state_manager_guard = self.app_state_manager.lock().unwrap();
+        let state = state_manager_guard.get_state().unwrap();
+        let storage_guard = self.storage.lock().unwrap();
+
         let mut dialog_context = DialogContext {
-            config: self.config.lock().unwrap(),
-            state: self.app_state_manager.lock().unwrap().get_state().unwrap(),
-            storage: self.storage.lock().unwrap(),
+            config: &*config_guard,
+            state: &state,
+            storage: &*storage_guard,
         };
 
         if !dialog.show(ctx, &mut dialog_context) {
@@ -416,22 +434,28 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_test_app() -> (TimeTrackerApp, TempDir) {
+        use std::sync::mpsc::channel;
+        
+        let (tx, rx) = channel();
         let temp_dir = TempDir::new().unwrap();
         let config = Config::default();
-        let storage = Storage::new(config.storage.clone()).unwrap();
-        let app_tracker = AppTracker::new(Default::default());
-        let pomodoro = PomodoroTimer::new(Default::default(), Default::default());
-        let state_manager = AppStateManager::new(
-            temp_dir.path().to_path_buf(),
-            true,
-        ).unwrap();
-
+        
         let app = TimeTrackerApp::new(
-            config,
-            storage,
-            app_tracker,
-            pomodoro,
-            state_manager,
+            Arc::new(Mutex::new(config.clone())),
+            Arc::new(Mutex::new(Storage::new_in_memory().unwrap())),
+            Arc::new(Mutex::new(PomodoroTimer::new(Default::default(), Default::default()))),
+            Arc::new(Mutex::new(AppTracker::new(Default::default())
+                .expect("Failed to create AppTracker"))),
+            Arc::new(Mutex::new(AppStateManager::new(
+                temp_dir.path().to_path_buf(),
+                true,
+            ).unwrap())),
+            Arc::new(Mutex::new(TrayManager::new(
+                temp_dir.path().join("icon.png"),
+                tx.clone()
+            ).unwrap())),
+            Arc::new(Mutex::new(HotkeyManager::new(config.general.hotkeys))),
+            rx,
         );
 
         (app, temp_dir)
@@ -487,9 +511,9 @@ mod tests {
 
 // 修改 DialogContext 的定义，使用 MutexGuard
 pub struct DialogContext<'a> {
-    pub config: std::sync::MutexGuard<'a, Config>,
-    pub state: std::sync::MutexGuard<'a, AppState>,
-    pub storage: std::sync::MutexGuard<'a, Storage>,
+    pub config: &'a Config,
+    pub state: &'a AppState,
+    pub storage: &'a Storage,
 }
 
 // 修改 DialogHandler trait 以适应新的 DialogContext
@@ -521,4 +545,42 @@ fn is_dark_mode_enabled() -> bool {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn is_dark_mode_enabled() -> bool {
     false
+}
+
+#[cfg(test)]
+impl TimeTrackerApp {
+    pub fn test_new() -> Self {
+        use crate::config::Config;
+        use crate::storage::Storage;
+        use crate::pomodoro::PomodoroTimer;
+        use crate::app_tracker::AppTracker;
+        use crate::storage::app_state::AppStateManager;
+        use crate::tray::TrayManager;
+        use crate::hotkeys::HotkeyManager;
+        use std::sync::{Arc, Mutex};
+        use std::sync::mpsc::channel;
+        use tempfile::TempDir;
+
+        let (tx, rx) = channel();
+        let temp_dir = TempDir::new().unwrap();
+        let config = Config::default();
+        
+        Self::new(
+            Arc::new(Mutex::new(config.clone())),
+            Arc::new(Mutex::new(Storage::new_in_memory().unwrap())),
+            Arc::new(Mutex::new(PomodoroTimer::new(Default::default(), Default::default()))),
+            Arc::new(Mutex::new(AppTracker::new(Default::default())
+                .expect("Failed to create AppTracker"))),
+            Arc::new(Mutex::new(AppStateManager::new(
+                temp_dir.path().to_path_buf(),
+                true,
+            ).unwrap())),
+            Arc::new(Mutex::new(TrayManager::new(
+                temp_dir.path().join("icon.png"),
+                tx.clone()
+            ).unwrap())),
+            Arc::new(Mutex::new(HotkeyManager::new(config.general.hotkeys))),
+            rx,
+        )
+    }
 }

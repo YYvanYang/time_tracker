@@ -1,13 +1,12 @@
 //src/ui/views/pomodoro.rs
 
-use crate::error::Result;
 use crate::ui::{styles, components::*};
 use crate::ui::TimeTrackerApp;
 use crate::storage::{PomodoroStatus, Tag};
 use eframe::egui;
 use chrono::{Local, NaiveDateTime, Timelike};
 use std::time::Duration;
-use crate::pomodoro::PomodoroStats as CorePomodoroStats;
+use crate::pomodoro::PomodoroStats;
 
 pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     Card::new()
@@ -179,7 +178,7 @@ fn format_duration(duration: Duration) -> String {
     }
 }
 
-fn get_productivity_suggestion(stats: &CorePomodoroStats) -> Option<String> {
+fn get_productivity_suggestion(stats: &PomodoroStats) -> Option<String> {
     if stats.total_completed == 0 {
         Some("开始你的第一个番茄钟吧！".to_string())
     } else {
@@ -199,7 +198,7 @@ fn get_productivity_suggestion(stats: &CorePomodoroStats) -> Option<String> {
     }
 }
 
-fn find_most_productive_hour(stats: &CorePomodoroStats) -> Option<u32> {
+fn find_most_productive_hour(stats: &PomodoroStats) -> Option<u32> {
     let mut hourly_completion = vec![0; 24];
     for (date, count) in &stats.daily_completed {
         hourly_completion[date.hour() as usize] += count;
@@ -209,26 +208,6 @@ fn find_most_productive_hour(stats: &CorePomodoroStats) -> Option<u32> {
         .enumerate()
         .max_by_key(|(_, &count)| count)
         .map(|(hour, _)| hour as u32)
-}
-
-// 自定义统计数据结构
-#[derive(Default)]
-struct PomodoroStats {
-    completed: u32,
-    interrupted: u32,
-    total_work_time: Duration,
-    longest_focus: Duration,
-    daily_completed: Vec<(NaiveDateTime, u32)>,
-    records: Vec<PomodoroRecord>,
-}
-
-#[derive(Debug)]
-struct PomodoroRecord {
-    end_time: NaiveDateTime,
-    status: PomodoroStatus,
-    project: Option<String>,
-    tags: Vec<String>,
-    notes: Option<String>,
 }
 
 #[cfg(test)]
@@ -241,7 +220,7 @@ mod tests {
         let ctx = Context::default();
         let mut app = TimeTrackerApp::test_new();
 
-        ctx.run(|ctx| {
+        ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 render(&mut app, ui);
             });
@@ -257,7 +236,15 @@ mod tests {
 
     #[test]
     fn test_productivity_suggestions() {
-        let mut stats = PomodoroStats::default();
+        let mut stats = PomodoroStats {
+            total_completed: 0,
+            total_interrupted: 0,
+            total_work_time: Duration::from_secs(0),
+            total_break_time: Duration::from_secs(0),
+            current_streak: 0,
+            longest_streak: 0,
+            daily_completed: Vec::new(),
+        };
         
         // 测试新用户建议
         assert_eq!(
@@ -266,8 +253,8 @@ mod tests {
         );
 
         // 测试低完成率建议
-        stats.completed = 1;
-        stats.interrupted = 3;
+        stats.total_completed = 1;
+        stats.total_interrupted = 3;
         assert_eq!(
             get_productivity_suggestion(&stats),
             Some("提示：尝试将手机调至勿扰模式，减少干扰。".to_string())
@@ -276,24 +263,33 @@ mod tests {
 
     #[test]
     fn test_most_productive_hour() {
-        let mut stats = PomodoroStats::default();
-        
-        // 添加测试数据
-        stats.daily_completed.push((
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
-                .with_hour(9).unwrap(),
-            3
-        ));
-        stats.daily_completed.push((
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
-                .with_hour(9).unwrap(),
-            2
-        ));
-        stats.daily_completed.push((
-            NaiveDateTime::from_timestamp_opt(0, 0).unwrap()
-                .with_hour(14).unwrap(),
-            1
-        ));
+        use chrono::TimeZone;
+
+        let stats = PomodoroStats {
+            total_completed: 5,
+            total_interrupted: 0,
+            total_work_time: Duration::from_secs(0),
+            total_break_time: Duration::from_secs(0),
+            current_streak: 0,
+            longest_streak: 0,
+            daily_completed: vec![
+                (
+                    Local.timestamp_opt(0, 0).unwrap()
+                        .with_hour(9).unwrap(),
+                    3
+                ),
+                (
+                    Local.timestamp_opt(0, 0).unwrap()
+                        .with_hour(9).unwrap(),
+                    2
+                ),
+                (
+                    Local.timestamp_opt(0, 0).unwrap()
+                        .with_hour(14).unwrap(),
+                    1
+                ),
+            ],
+        };
 
         assert_eq!(find_most_productive_hour(&stats), Some(9));
     }

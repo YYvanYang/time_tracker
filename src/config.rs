@@ -5,6 +5,7 @@ use std::fs;
 use std::time::Duration;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc::channel;
+use crate::hotkeys::HotkeyConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -33,6 +34,8 @@ pub struct GeneralConfig {
     pub minimize_to_tray: bool,
     pub language: String,
     pub check_updates: bool,
+    #[serde(default)]
+    pub hotkeys: HotkeyConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +118,7 @@ impl Default for GeneralConfig {
             minimize_to_tray: true,
             language: String::from("en"),
             check_updates: true,
+            hotkeys: HotkeyConfig::default(),
         }
     }
 }
@@ -245,6 +249,12 @@ impl Config {
             return Err(TimeTrackerError::Config(
                 "Font size must be between 8 and 32".into()
             ));
+        }
+
+        // 验证热键配置
+        if self.general.hotkeys.enabled {
+            // 这里可以添加对热键格式的验证
+            // 例如检查热键字符串格式是否正确
         }
 
         Ok(())

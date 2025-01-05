@@ -79,12 +79,12 @@ impl Card {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::Context;
+    use eframe::egui::{Context, RawInput};
 
     #[test]
     fn test_card() {
         let ctx = Context::default();
-        ctx.run(|ctx| {
+        ctx.run(RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let card = Card::new()
                     .collapsible("Test Card");

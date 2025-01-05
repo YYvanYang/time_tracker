@@ -110,12 +110,12 @@ impl Chart {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::Context;
+    use eframe::egui::{Context, RawInput};
 
     #[test]
     fn test_chart() {
         let ctx = Context::default();
-        ctx.run(|ctx| {
+        ctx.run(RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let data = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 4.0)];
                 let chart = Chart::new(data)

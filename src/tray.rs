@@ -1,5 +1,3 @@
-//src/tray.rs
-
 use crate::error::{Result, TimeTrackerError};
 use std::sync::mpsc::{self, Sender};
 use std::path::PathBuf;
@@ -106,8 +104,14 @@ mod tests {
 
     #[test]
     fn test_tray_events() {
-        let tray = TrayManager::new().unwrap();
-        let receiver = tray.get_event_receiver();
+        // 创建一个通道来接收事件
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        // 创建一个临时图标路径
+        let icon_path = std::path::PathBuf::from("resources/app_icon.png");
+        
+        // 使用正确的参数创建 TrayManager
+        let tray = TrayManager::new(icon_path, sender).unwrap();
 
         // 发送事件
         tray.send_event(TrayEvent::Show).unwrap();
@@ -125,7 +129,14 @@ mod tests {
 
     #[test]
     fn test_tray_status_update() {
-        let mut tray = TrayManager::new().unwrap();
+        // 创建一个通道来接收事件
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        
+        // 创建一个临时图标路径
+        let icon_path = std::path::PathBuf::from("resources/app_icon.png");
+        
+        // 使用正确的参数创建 TrayManager
+        let mut tray = TrayManager::new(icon_path, sender).unwrap();
         
         // 测试不同状态的图标和提示文本更新
         assert!(tray.update_pomodoro_status("工作中").is_ok());

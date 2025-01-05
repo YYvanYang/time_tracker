@@ -2,13 +2,10 @@
 
 use super::models::*;
 use crate::error::{Result, TimeTrackerError};
-use rusqlite::{Connection, params, Row};
+use rusqlite::{Connection, Row};
 use chrono::{DateTime, Local, NaiveDateTime, Datelike, Timelike};
 use std::collections::HashMap;
 use std::time::Duration;
-
-#[cfg(test)]
-use test_log;
 
 pub trait FromRow {
     fn from_row(row: &Row) -> rusqlite::Result<Self>
@@ -298,7 +295,7 @@ pub fn get_productivity_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_log;
+    use tempfile::TempDir;
     
     // 使用fixture模式
     struct TestFixture {
@@ -311,8 +308,10 @@ mod tests {
             let temp_dir = TempDir::new().unwrap();
             let conn = Connection::open(temp_dir.path().join("test.db")).unwrap();
             
-            // 初始化测试数据库
-            conn.execute_batch(include_str!("../../tests/fixtures/schema.sql")).unwrap();
+            // 初始化测试数据库，按顺序应用所有迁移
+            conn.execute_batch(include_str!("../../migrations/001_initial_schema.sql")).unwrap();
+            conn.execute_batch(include_str!("../../migrations/002_add_productivity.sql")).unwrap();
+            conn.execute_batch(include_str!("../../migrations/003_add_indexes.sql")).unwrap();
             
             Self {
                 conn,
@@ -323,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_query_builder() {
-        let fixture = TestFixture::new();
+        let _fixture = TestFixture::new();
         // 使用fixture进行测试
     }
 }

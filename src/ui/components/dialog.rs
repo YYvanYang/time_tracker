@@ -6,6 +6,7 @@ use crate::ui::{styles, TimeTrackerApp, DialogHandler, DialogContext};
 use eframe::egui;
 use crate::error::TimeTrackerError;
 use rfd::FileDialog;
+use chrono::{NaiveDate, Local};
 
 // 基础对话框特征
 pub trait Dialog {
@@ -266,7 +267,11 @@ impl Dialog for ExportDialog {
                 // 日期范围
                 ui.label("日期范围");
                 ui.horizontal(|ui| {
-                    // TODO: 添加日期选择器
+                    let mut date_picker = DateRangePicker::new();
+                    let (start_date, end_date) = date_picker.show(ui);
+                    // TODO
+                    // 这里可以使用选择的日期范围进行其他操作
+                    // 比如更新数据显示等
                 });
 
                 // 导出内容选择
@@ -741,23 +746,133 @@ impl DialogHandler for SettingsDialog {
     }
 }
 
+pub struct DateRangePicker {
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+}
+
+impl DateRangePicker {
+    pub fn new() -> Self {
+        let today = Local::now().date_naive();
+        Self {
+            start_date: today - chrono::Duration::days(7),  // 默认显示最近7天
+            end_date: today,
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui) -> (NaiveDate, NaiveDate) {
+        ui.horizontal(|ui| {
+            // 开始日期
+            ui.label("从：");
+            let mut start_date_str = self.start_date.format("%Y-%m-%d").to_string();
+            if ui.text_edit_singleline(&mut start_date_str).changed() {
+                if let Ok(date) = NaiveDate::parse_from_str(&start_date_str, "%Y-%m-%d") {
+                    if date <= self.end_date {
+                        self.start_date = date;
+                    }
+                }
+            }
+
+            // 结束日期
+            ui.label("至：");
+            let mut end_date_str = self.end_date.format("%Y-%m-%d").to_string();
+            if ui.text_edit_singleline(&mut end_date_str).changed() {
+                if let Ok(date) = NaiveDate::parse_from_str(&end_date_str, "%Y-%m-%d") {
+                    if date >= self.start_date {
+                        self.end_date = date;
+                    }
+                }
+            }
+
+            // 快捷选择按钮
+            if ui.button("今天").clicked() {
+                let today = Local::now().date_naive();
+                self.start_date = today;
+                self.end_date = today;
+            }
+            if ui.button("最近7天").clicked() {
+                self.end_date = Local::now().date_naive();
+                self.start_date = self.end_date - chrono::Duration::days(7);
+            }
+            if ui.button("最近30天").clicked() {
+                self.end_date = Local::now().date_naive();
+                self.start_date = self.end_date - chrono::Duration::days(30);
+            }
+        });
+
+        (self.start_date, self.end_date)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::Context;
+    use eframe::egui::{Context, RawInput};
     use crate::ui::TimeTrackerApp;
     use tempfile::TempDir;
+    use std::sync::{Arc, Mutex};
+    use std::sync::mpsc;
 
     #[test]
     fn test_confirmation_dialog() {
         let ctx = Context::default();
         let temp_dir = TempDir::new().unwrap();
+        
+        // 创建所需的组件
+        let config = Arc::new(Mutex::new(Default::default()));
+        
+        // 创建存储配置
+        let storage_config = crate::storage::StorageConfig {
+            data_dir: temp_dir.path().to_path_buf(),
+            backup_enabled: false,
+            backup_interval: std::time::Duration::from_secs(3600),
+            max_backup_count: 1,
+            vacuum_threshold: 1024,
+        };
+        
+        let storage = Arc::new(Mutex::new(
+            crate::storage::Storage::new(storage_config).unwrap()
+        ));
+
+        // 创建番茄钟计时器
+        let pomodoro_timer = Arc::new(Mutex::new(
+            crate::pomodoro::PomodoroTimer::new(
+                Default::default(),
+                crate::pomodoro::PomodoroCallbacks::default()
+            )
+        ));
+
+        // 创建应用追踪器
+        let app_tracker = Arc::new(Mutex::new(
+            crate::app_tracker::AppTracker::new(Default::default()).unwrap()
+        ));
+
+        let app_state_manager = Arc::new(Mutex::new(
+            crate::storage::app_state::AppStateManager::new(
+                temp_dir.path().to_path_buf(),
+                false
+            ).unwrap()
+        ));
+        let (tray_sender, tray_event_receiver) = mpsc::channel();
+        let tray_manager = Arc::new(Mutex::new(
+            crate::tray::TrayManager::new(
+                temp_dir.path().join("tray_icon.png"),
+                tray_sender
+            ).unwrap()
+        ));
+        let hotkey_manager = Arc::new(Mutex::new(
+            crate::hotkeys::HotkeyManager::new(Default::default())
+        ));
+
         let mut app = TimeTrackerApp::new(
-            Default::default(),
-            crate::storage::Storage::new(&temp_dir.path().to_path_buf()).unwrap(),
-            Default::default(),
-            Default::default(),
-            Default::default(),
+            config,
+            storage,
+            pomodoro_timer,
+            app_tracker,
+            app_state_manager,
+            tray_manager,
+            hotkey_manager,
+            tray_event_receiver,
         );
 
         let mut dialog = ConfirmationDialog {
@@ -767,8 +882,8 @@ mod tests {
             on_cancel: None,
         };
 
-        ctx.run(|ctx| {
-            assert!(dialog.show(ctx, &mut app));
+        ctx.run(RawInput::default(), |ctx| {
+            assert!(Dialog::show(&mut dialog, ctx, &mut app));
         });
     }
 }

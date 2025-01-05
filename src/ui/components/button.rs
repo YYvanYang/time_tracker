@@ -60,12 +60,12 @@ impl Button {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::Context;
+    use eframe::egui::{Context, RawInput};
 
     #[test]
     fn test_button() {
         let ctx = Context::default();
-        ctx.run(|ctx| {
+        ctx.run(RawInput::default(), |ctx| {
             let mut used_size = egui::Vec2::ZERO;
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = Button::new("Test")

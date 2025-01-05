@@ -69,6 +69,18 @@ impl Storage {
         Ok(Self { pool, config })
     }
 
+    pub fn new_in_memory() -> Result<Self> {
+        let manager = SqliteConnectionManager::memory();
+        let pool = Pool::new(manager)?;
+        let config = StorageConfig::default();
+        
+        // 初始化数据库
+        let mut conn = pool.get()?;
+        migrations::run_migrations(&mut conn)?;
+        
+        Ok(Self { pool, config })
+    }
+
     /// 创建数据库备份
     pub fn backup(&self) -> Result<PathBuf> {
         let mut conn = self.pool.get()?;
@@ -322,8 +334,8 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn create_test_storage() -> (Storage, TempDir) {
-        let temp_dir = TempDir::new().unwrap();
+    fn create_test_storage() -> Result<(Storage, TempDir)> {
+        let temp_dir = TempDir::new()?;
         let config = StorageConfig {
             data_dir: temp_dir.path().to_path_buf(),
             backup_enabled: true,
@@ -331,20 +343,20 @@ mod tests {
             max_backup_count: 3,
             vacuum_threshold: 1024 * 1024,  // 1MB
         };
-        let storage = Storage::new(config).unwrap();
-        (storage, temp_dir)
+        let storage = Storage::new(config)?;
+        Ok((storage, temp_dir))
     }
 
     #[test]
     fn test_storage_initialization() {
-        let (storage, _temp_dir) = create_test_storage();
+        let (storage, _temp_dir) = create_test_storage().unwrap();
         let health = storage.check_health().unwrap();
         assert!(health.is_healthy);
     }
 
     #[test]
     fn test_backup_and_cleanup() -> Result<()> {
-        let (storage, _temp_dir) = create_test_storage();
+        let (storage, _temp_dir) = create_test_storage().unwrap();
         
         // 创建多个备份
         for _ in 0..5 {
@@ -358,7 +370,7 @@ mod tests {
 
         // 验证是保留了最新的备份
         let backup_times: Vec<_> = backups.iter()
-            .filter_map(|path| path.metadata().ok())
+            .filter_map(|(path, _)| path.metadata().ok())
             .filter_map(|meta| meta.modified().ok())
             .collect();
         
@@ -369,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_old_data() -> Result<()> {
-        let (storage, _temp_dir) = create_test_storage();
+        let (storage, _temp_dir) = create_test_storage().unwrap();
         
         // 清理30天前的数据
         storage.cleanup_old_data(30)?;
@@ -388,10 +400,10 @@ mod tests {
 
     #[test]
     fn test_transaction() -> Result<()> {
-        let (storage, _temp_dir) = create_test_storage();
+        let (storage, _temp_dir) = create_test_storage().unwrap();
 
         // 测试成功的事务
-        let result = storage.execute_transaction(|tx| {
+        let result: Result<()> = storage.execute_transaction(|tx| {
             tx.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)", [])?;
             tx.execute("INSERT INTO test VALUES (?1)", [1])?;
             Ok(())
@@ -399,7 +411,7 @@ mod tests {
         assert!(result.is_ok());
 
         // 测试失败的事务
-        let result = storage.execute_transaction(|tx| {
+        let result: Result<()> = storage.execute_transaction(|tx| {
             tx.execute("INSERT INTO test VALUES (?1)", [2])?;
             Err(TimeTrackerError::Storage("Test rollback".into()))
         });

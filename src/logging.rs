@@ -9,9 +9,22 @@ use std::sync::Mutex;
 
 const MAX_IN_MEMORY_LOGS: usize = 1000;
 
+#[derive(Debug)]
 pub struct Logger {
     file: Option<Mutex<File>>,
     recent_logs: Mutex<VecDeque<LogEntry>>,
+}
+
+impl Clone for Logger {
+    fn clone(&self) -> Self {
+        // 创建一个新的 Logger，共享相同的日志文件
+        Logger {
+            // 对于文件，我们不克隆它，而是返回 None
+            file: None,
+            // 为日志记录创建一个新的空 VecDeque
+            recent_logs: Mutex::new(VecDeque::new()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,9 +120,12 @@ mod tests {
     #[test]
     fn test_logger_in_memory() -> Result<()> {
         let logger = Logger::new(None)?;
-
-        // 添加一些日志
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+        
+        // 克隆 logger，一个用于全局日志系统，一个用于测试
+        let logger_for_global = logger.clone();
+        
+        // 设置全局日志系统
+        log::set_boxed_logger(Box::new(logger_for_global)).unwrap();
         log::set_max_level(LevelFilter::Info);
 
         log::info!("Test info message");
@@ -140,7 +156,8 @@ mod tests {
     #[test]
     fn test_log_levels() -> Result<()> {
         let logger = Logger::new(None)?;
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+        let logger_for_global = logger.clone();
+        log::set_boxed_logger(Box::new(logger_for_global)).unwrap();
         log::set_max_level(LevelFilter::Warn);
 
         log::info!("This should not be recorded in memory with Warn level");
@@ -158,7 +175,8 @@ mod tests {
     #[test]
     fn test_max_in_memory_logs() -> Result<()> {
         let logger = Logger::new(None)?;
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+        let logger_for_global = logger.clone();
+        log::set_boxed_logger(Box::new(logger_for_global)).unwrap();
         log::set_max_level(LevelFilter::Info);
 
         for i in 0..MAX_IN_MEMORY_LOGS + 50 {
@@ -167,7 +185,7 @@ mod tests {
 
         let recent_logs = logger.get_recent_logs();
         assert_eq!(recent_logs.len(), MAX_IN_MEMORY_LOGS);
-        assert!(recent_logs.first().unwrap().message.contains(&(50_usize).to_string())); // 检查最早的日志是否是第 50 条
+        assert!(recent_logs.first().unwrap().message.contains(&(50_usize).to_string()));
 
         Ok(())
     }
@@ -175,7 +193,8 @@ mod tests {
     #[test]
     fn test_log_filtering() -> Result<()> {
         let logger = Logger::new(None)?;
-        log::set_boxed_logger(Box::new(logger)).unwrap();
+        let logger_for_global = logger.clone();
+        log::set_boxed_logger(Box::new(logger_for_global)).unwrap();
         log::set_max_level(LevelFilter::Trace);
 
         logger.log(
