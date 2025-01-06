@@ -199,6 +199,16 @@ impl TimeTrackerApp {
         }
         Ok(())
     }
+
+    pub fn handle_date_range_selected(&mut self, start: DateTime<Local>, end: DateTime<Local>) {
+        // 更新当前对话框的日期范围
+        if let Some(dialog) = self.ui_state.dialog_stack.last_mut() {
+            if let Some(export_dialog) = dialog.as_any_mut().downcast_mut::<ExportDialog>() {
+                export_dialog.date_range.start = start;
+                export_dialog.date_range.end = end;
+            }
+        }
+    }
 }
 
 impl eframe::App for TimeTrackerApp {

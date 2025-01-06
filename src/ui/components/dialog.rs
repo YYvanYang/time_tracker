@@ -5,7 +5,7 @@ use crate::pomodoro::PomodoroConfig;
 use eframe::egui;
 use crate::error::TimeTrackerError;
 use rfd::FileDialog;
-use chrono::{NaiveDate, Local, Datelike, Timelike};
+use chrono::{NaiveDate, Local, Datelike, Timelike, DateTime};
 use open;
 use std::sync::{Arc, Mutex};
 
@@ -290,25 +290,14 @@ impl Dialog for ExportDialog {
                     ));
                     
                     if ui.button("选择日期范围").clicked() {
-                        let mut date_picker = DateRangeDialog::new()
+                        let start = self.date_range.start;
+                        let end = self.date_range.end;
+                        let date_picker = DateRangeDialog::new()
                             .with_dates(
-                                self.date_range.start.date_naive(),
-                                self.date_range.end.date_naive()
-                            )
-                            .with_callback(|start, end| {
-                                // 更新导出对话框的日期范围
-                                self.date_range.start = start
-                                    .and_hms_opt(0, 0, 0)
-                                    .unwrap()
-                                    .and_local_timezone(chrono::Local)
-                                    .unwrap();
-                                
-                                self.date_range.end = end
-                                    .and_hms_opt(23, 59, 59)
-                                    .unwrap()
-                                    .and_local_timezone(chrono::Local)
-                                    .unwrap();
-                            });
+                                start.date_naive(),
+                                end.date_naive()
+                            );
+
                         dialog_ctx.app.push_dialog(Box::new(date_picker));
                     }
                 });
@@ -953,6 +942,10 @@ impl std::fmt::Debug for ConfirmationDialog {
     }
 }
 
+pub trait DialogHandler: std::any::Any + Send {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool;
+}
+
 impl DialogHandler for ConfirmationDialog {
     fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         if let Err(e) = self.validate() {
@@ -973,8 +966,8 @@ impl DialogHandler for ConfirmationDialog {
                             if let Err(e) = on_confirm(dialog_ctx.app) {
                                 dialog_ctx.show_error(e.to_string());
                             }
-                            should_close = true;
                         }
+                        should_close = true;
                     }
                     if ui.button("取消").clicked() {
                         if let Some(on_cancel) = self.on_cancel.take() {
@@ -1041,25 +1034,14 @@ impl DialogHandler for ExportDialog {
                     ));
                     
                     if ui.button("选择日期范围").clicked() {
-                        let mut date_picker = DateRangeDialog::new()
+                        let start = self.date_range.start;
+                        let end = self.date_range.end;
+                        let date_picker = DateRangeDialog::new()
                             .with_dates(
-                                self.date_range.start.date_naive(),
-                                self.date_range.end.date_naive()
-                            )
-                            .with_callback(|start, end| {
-                                // 更新导出对话框的日期范围
-                                self.date_range.start = start
-                                    .and_hms_opt(0, 0, 0)
-                                    .unwrap()
-                                    .and_local_timezone(chrono::Local)
-                                    .unwrap();
-                                
-                                self.date_range.end = end
-                                    .and_hms_opt(23, 59, 59)
-                                    .unwrap()
-                                    .and_local_timezone(chrono::Local)
-                                    .unwrap();
-                            });
+                                start.date_naive(),
+                                end.date_naive()
+                            );
+
                         dialog_ctx.app.push_dialog(Box::new(date_picker));
                     }
                 });
@@ -1153,7 +1135,6 @@ impl DialogHandler for SettingsDialog {
 pub struct DateRangeDialog {
     pub start_date: NaiveDate,
     pub end_date: NaiveDate,
-    pub on_select: Option<Box<dyn FnMut(NaiveDate, NaiveDate) + Send + 'static>>,
     calendar_visible: bool,
     editing_start: bool,
 }
@@ -1163,163 +1144,159 @@ impl DateRangeDialog {
         Self {
             start_date: chrono::Local::now().date_naive(),
             end_date: chrono::Local::now().date_naive(),
-            on_select: None,
             calendar_visible: false,
             editing_start: false,
         }
     }
 
-    pub fn with_dates(mut self, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Self {
+    pub fn with_dates(mut self, start: NaiveDate, end: NaiveDate) -> Self {
         self.start_date = start;
         self.end_date = end;
         self
     }
 
-    pub fn with_callback<F>(mut self, callback: F) -> Self 
-    where
-        F: FnMut(NaiveDate, NaiveDate) + Send + 'static
-    {
-        self.on_select = Some(Box::new(callback));
-        self
-    }
-
-    fn show_calendar(&mut self, ui: &mut egui::Ui, selected_date: &mut NaiveDate) {
-        let mut year = selected_date.year();
-        let mut month = selected_date.month() as i32;
-
-        ui.horizontal(|ui| {
-            if ui.small_button("◀").clicked() {
-                month -= 1;
-                if month < 1 {
-                    month = 12;
-                    year -= 1;
-                }
-            }
-            
-            ui.label(format!("{:04}-{:02}", year, month));
-            
-            if ui.small_button("▶").clicked() {
-                month += 1;
-                if month > 12 {
-                    month = 1;
-                    year += 1;
-                }
-            }
-        });
-
-        ui.add_space(4.0);
-
-        // 显示星期标题
-        ui.horizontal(|ui| {
-            for weekday in ["日", "一", "二", "三", "四", "五", "六"] {
-                ui.label(weekday);
-            }
-        });
-
-        // 计算当月第一天是星期几
-        let first_day = NaiveDate::from_ymd_opt(year, month as u32, 1).unwrap();
-        let mut current_day = first_day - chrono::Duration::days(first_day.weekday().num_days_from_sunday() as i64);
-
-        // 显示日历网格
-        for _week in 0..6 {
+    fn show_calendar(&mut self, ui: &mut egui::Ui, date: &mut NaiveDate) {
+        ui.vertical(|ui| {
+            // 显示年月选择器
             ui.horizontal(|ui| {
-                for _weekday in 0..7 {
-                    let is_current_month = current_day.month() == month as u32;
-                    let is_selected = current_day == *selected_date;
-                    
-                    let button_text = if is_current_month {
-                        egui::RichText::new(format!("{:2}", current_day.day()))
-                    } else {
-                        egui::RichText::new(format!("{:2}", current_day.day()))
-                            .color(ui.style().visuals.weak_text_color())
-                    };
-
-                    let mut button = egui::Button::new(button_text);
-                    if is_selected {
-                        button = button.fill(ui.style().visuals.selection.bg_fill);
-                    }
-                    
-                    if ui.add(button).clicked() {
-                        *selected_date = current_day;
-                        self.calendar_visible = false;
-                    }
-                    
-                    current_day += chrono::Duration::days(1);
+                if ui.button("◀").clicked() {
+                    *date = date.checked_sub_months(chrono::Months::new(1)).unwrap();
+                }
+                ui.label(date.format("%Y年%m月").to_string());
+                if ui.button("▶").clicked() {
+                    *date = date.checked_add_months(chrono::Months::new(1)).unwrap();
                 }
             });
-        }
+
+            // 显示星期标题
+            ui.horizontal(|ui| {
+                for weekday in ["日", "一", "二", "三", "四", "五", "六"] {
+                    ui.label(weekday);
+                }
+            });
+
+            // 获取当月第一天和最后一天
+            let first_day = NaiveDate::from_ymd_opt(date.year(), date.month(), 1).unwrap();
+            let last_day = NaiveDate::from_ymd_opt(
+                date.year(),
+                date.month() + 1,
+                1
+            ).unwrap_or(
+                NaiveDate::from_ymd_opt(date.year() + 1, 1, 1).unwrap()
+            ).pred_opt().unwrap();
+
+            // 计算第一天是星期几
+            let first_weekday = first_day.weekday().num_days_from_sunday();
+
+            // 显示日历网格
+            let mut current_date = first_day - chrono::Duration::days(first_weekday as i64);
+            while current_date <= last_day || current_date.weekday().num_days_from_sunday() != 0 {
+                ui.horizontal(|ui| {
+                    for _ in 0..7 {
+                        let is_current_month = current_date.month() == date.month();
+                        let is_selected = current_date == *date;
+
+                        let text = current_date.day().to_string();
+                        if ui.add(egui::Button::new(text)
+                            .fill(if is_selected {
+                                ui.style().visuals.selection.bg_fill
+                            } else {
+                                ui.style().visuals.widgets.noninteractive.bg_fill
+                            })
+                            .enabled(is_current_month)
+                        ).clicked() {
+                            *date = current_date;
+                            self.calendar_visible = false;
+                        }
+                        current_date = current_date.succ_opt().unwrap();
+                    }
+                });
+            }
+        });
     }
 }
 
-impl Dialog for DateRangeDialog {
+impl DialogHandler for DateRangeDialog {
     fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         let mut should_close = false;
 
-        let window = egui::Window::new("选择日期范围")
+        egui::Window::new("选择日期范围")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
-            .open(&mut is_open);
-
-        window.show(ctx, |ui| {
-            ui.vertical(|ui| {
-                // 显示日期按钮
-                ui.horizontal(|ui| {
-                    ui.label("开始日期:");
-                    if ui.button(self.start_date.format("%Y-%m-%d").to_string()).clicked() {
-                        self.calendar_visible = true;
-                        self.editing_start = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("结束日期:");
-                    if ui.button(self.end_date.format("%Y-%m-%d").to_string()).clicked() {
-                        self.calendar_visible = true;
-                        self.editing_start = false;
-                    }
-                });
-
-                // 显示日历
-                if self.calendar_visible {
-                    // 创建一个临时变量来存储修改后的日期
-                    let mut temp_date = if self.editing_start {
-                        self.start_date
-                    } else {
-                        self.end_date
-                    };
-
-                    // 使用临时变量显示日历
-                    self.show_calendar(ui, &mut temp_date);
-
-                    // 更新相应的日期
-                    if self.editing_start {
-                        self.start_date = temp_date;
-                    } else {
-                        self.end_date = temp_date;
-                    }
-                }
-
-                ui.add_space(8.0);
-
-                // 按钮区域
-                ui.horizontal(|ui| {
-                    if ui.button("确定").clicked() {
-                        if let Some(mut on_select) = self.on_select.take() {
-                            on_select(self.start_date, self.end_date);
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    // 显示日期按钮
+                    ui.horizontal(|ui| {
+                        ui.label("开始日期:");
+                        if ui.button(self.start_date.format("%Y-%m-%d").to_string()).clicked() {
+                            self.calendar_visible = true;
+                            self.editing_start = true;
                         }
-                        should_close = true;
-                    }
-                    if ui.button("取消").clicked() {
-                        if let Some(mut on_select) = self.on_select.take() {
-                            on_select(self.start_date, self.end_date);
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("结束日期:");
+                        if ui.button(self.end_date.format("%Y-%m-%d").to_string()).clicked() {
+                            self.calendar_visible = true;
+                            self.editing_start = false;
                         }
-                        should_close = true;
+                    });
+
+                    // 显示日历
+                    if self.calendar_visible {
+                        let mut temp_date = if self.editing_start {
+                            self.start_date
+                        } else {
+                            self.end_date
+                        };
+
+                        self.show_calendar(ui, &mut temp_date);
+
+                        if self.editing_start {
+                            self.start_date = temp_date;
+                        } else {
+                            self.end_date = temp_date;
+                        }
                     }
+
+                    ui.add_space(8.0);
+
+                    // 按钮区域
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() {
+                            // 先获取栈的长度
+                            let stack_len = dialog_ctx.app.ui_state.dialog_stack.len();
+                            if stack_len >= 2 {
+                                // 然后使用索引访问
+                                let export_dialog = dialog_ctx.app.ui_state.dialog_stack[stack_len - 2]
+                                    .as_any_mut()
+                                    .downcast_mut::<ExportDialog>();
+                                
+                                if let Some(export_dialog) = export_dialog {
+                                    export_dialog.date_range.start = self.start_date
+                                        .and_hms_opt(0, 0, 0)
+                                        .unwrap()
+                                        .and_local_timezone(chrono::Local)
+                                        .unwrap();
+                                    
+                                    export_dialog.date_range.end = self.end_date
+                                        .and_hms_opt(23, 59, 59)
+                                        .unwrap()
+                                        .and_local_timezone(chrono::Local)
+                                        .unwrap();
+                                }
+                            }
+                            should_close = true;
+                        }
+                        if ui.button("取消").clicked() {
+                            should_close = true;
+                        }
+                    });
                 });
             });
-        });
 
         if should_close {
             is_open = false;
