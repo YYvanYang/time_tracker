@@ -5,6 +5,8 @@ use crate::ui::{TimeTrackerApp, styles};
 use super::components::{Card, Chart};
 use crate::ui::components::dialog::DateRangeDialog;
 use chrono::NaiveDate;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 #[derive(PartialEq)]
 enum TimeRange {
@@ -30,15 +32,16 @@ impl TimeRange {
     }
 }
 
+static SELECTED_RANGE: Lazy<Mutex<Option<TimeRange>>> = Lazy::new(|| Mutex::new(None));
+
 pub fn render(app: &mut TimeTrackerApp, ctx: &egui::Context, ui: &mut egui::Ui) {
-    static mut SELECTED_RANGE: Option<TimeRange> = None;
     static mut DATE_RANGE_DIALOG: Option<DateRangeDialog> = None;
     
     let selected_range = unsafe {
-        if SELECTED_RANGE.is_none() {
-            SELECTED_RANGE = Some(TimeRange::LastWeek);
+        if SELECTED_RANGE.lock().unwrap().is_none() {
+            SELECTED_RANGE.lock().unwrap() = Some(TimeRange::LastWeek);
         }
-        SELECTED_RANGE.as_mut().unwrap()
+        SELECTED_RANGE.lock().unwrap().as_mut().unwrap()
     };
 
     let date_range_dialog = unsafe {
@@ -68,8 +71,8 @@ pub fn render(app: &mut TimeTrackerApp, ctx: &egui::Context, ui: &mut egui::Ui) 
                 date_range_dialog.open = true;
                 date_range_dialog.on_close = Some(Box::new(|result| {
                     if let Some((start, end)) = result {
-                        unsafe {
-                            *SELECTED_RANGE = Some(TimeRange::Custom(Some((start, end))));
+                        if let Ok(mut range) = SELECTED_RANGE.lock() {
+                            *range = Some(TimeRange::Custom(Some((start, end))));
                         }
                     }
                 }));

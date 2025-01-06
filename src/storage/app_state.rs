@@ -2,6 +2,7 @@ use crate::error::{Result, TimeTrackerError};
 use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppState {
@@ -76,7 +77,7 @@ pub struct Task {
     pub id: u32,
     pub title: String,
     pub completed: bool,
-    pub created_at: chrono::DateTime<chrono::Local>,
+    pub created_at: DateTime<Utc>,
 }
 
 impl Task {
@@ -86,7 +87,7 @@ impl Task {
             id: rand::thread_rng().gen(),
             title,
             completed: false,
-            created_at: chrono::Local::now(),
+            created_at: chrono::Utc::now(),
         }
     }
 }

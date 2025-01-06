@@ -158,18 +158,15 @@ impl TimeTrackerApp {
     }
 
     pub fn show_confirmation_dialog(
-        &mut self, 
-        title: String, 
-        message: String, 
-        on_confirm: Box<dyn FnOnce() + Send>
+        &mut self,
+        title: String,
+        message: String,
+        on_confirm: Box<dyn FnOnce(&mut TimeTrackerApp)>,
     ) {
         self.push_dialog(Box::new(ConfirmationDialog {
             title,
             message,
-            on_confirm: Some(Box::new(move |_| {
-                on_confirm();
-                Ok(())
-            })),
+            on_confirm: Some(on_confirm),
             on_cancel: None,
         }));
     }

@@ -36,6 +36,21 @@ impl ProjectDialog {
             on_save: None,
         }
     }
+
+    pub fn show_custom<F>(&mut self, ctx: &egui::Context, content: F) -> bool 
+    where
+        F: FnOnce(&mut egui::Ui)
+    {
+        let mut is_open = true;
+        egui::Window::new(&self.title)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                content(ui);
+            });
+        is_open
+    }
 }
 
 impl Dialog for ProjectDialog {
@@ -1203,7 +1218,7 @@ impl DateRangePicker {
                     if is_selected {
                         button = button.fill(ui.style().visuals.selection.bg_fill);
                     } else if !is_current_month {
-                        button = button.text_color(ui.style().visuals.weak_text_color());
+                        button = button.fill_fg_color(ui.style().visuals.weak_text_color());
                     }
                     
                     if ui.add(button).clicked() {
@@ -1462,7 +1477,7 @@ impl Default for DateRangeDialog {
 }
 
 impl DateRangeDialog {
-    fn show(&mut self, ctx: &egui::Context) {
+    pub fn show(&mut self, ctx: &egui::Context) {
         if !self.open {
             return;
         }
@@ -1524,7 +1539,7 @@ fn date_picker(ui: &mut egui::Ui, date: &mut NaiveDate) -> Option<NaiveDate> {
         ui.label("-");
         ui.add(egui::DragValue::new(&mut day).clamp_range(1..=31));
 
-        if let Ok(new_date) = NaiveDate::from_ymd_opt(year, month as u32, day as u32) {
+        if let Some(new_date) = NaiveDate::from_ymd_opt(year, month as u32, day as u32) {
             if new_date != *date {
                 changed = Some(new_date);
             }

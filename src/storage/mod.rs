@@ -5,19 +5,18 @@ mod migrations;
 pub mod queries;
 pub mod app_state;
 
-use crate::error::{Result, TimeTrackerError};
+use crate::error::Result;
 use chrono::{DateTime, Local, NaiveDateTime};
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use std::path::PathBuf;
-use std::sync::Arc;
 use r2d2_sqlite::SqliteConnectionManager;
 use r2d2::Pool;
 use crate::config;
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
+use crate::error::TimeTrackerError;
 
 pub use models::*;
-pub use app_state::AppStateManager;
 
 pub struct Storage {
     pool: Pool<SqliteConnectionManager>,
@@ -331,7 +330,7 @@ impl Storage {
     pub fn load_projects(&self) -> Result<Vec<Project>> {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, created_at, updated_at FROM projects"
+            "SELECT id, name, description, created_at, updated_at, color FROM projects"
         )?;
         
         let projects = stmt.query_map([], |row| {
@@ -341,6 +340,7 @@ impl Storage {
                 description: row.get(2)?,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
+                color: row.get(5)?,
             })
         })?;
 

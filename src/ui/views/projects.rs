@@ -1,10 +1,8 @@
 use eframe::egui;
 use crate::ui::{TimeTrackerApp, styles};
-use super::components::{Button, Card, Dialog, dialog::ProjectDialog};
+use super::components::{Button, Card, dialog::ProjectDialog};
 use crate::storage::Project;
 use chrono::{Utc, Local};
-use std::sync::Arc;
-use std::cell::RefCell;
 
 pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
@@ -21,11 +19,14 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     });
     ui.separator();
 
+    // 克隆项目列表以避免借用冲突
+    let projects = app.projects.clone();
+
     // 显示项目列表
     egui::ScrollArea::vertical()
         .auto_shrink([false; 2])
         .show(ui, |ui| {
-            for project in &app.projects {
+            for project in &projects {
                 Card::new().show(ui, |ui| {
                     ui.heading(&project.name);
                     ui.horizontal(|ui| {
@@ -40,7 +41,7 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                                 .clicked()
                             {
                                 let project = project.clone();
-                                ProjectDialog::new("编辑项目").show(ui.ctx(), |ui| {
+                                ProjectDialog::new("编辑项目").show_custom(ui.ctx(), |ui| {
                                     let mut project_name = project.name.clone();
                                     let mut project_description = project.description.clone().unwrap_or_default();
 
@@ -74,14 +75,22 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                                                 updated_project.color = project.color.clone();
                                                 updated_project.updated_at = Utc::now().with_timezone(&Local);
 
-                                                if let Ok(mut storage) = app.storage.lock() {
-                                                    if let Err(e) = storage.update_project(&updated_project) {
-                                                        app.show_error(format!("更新项目失败：{}", e));
-                                                    } else {
+                                                // 先执行更新操作
+                                                let update_result = {
+                                                    let mut storage = app.storage.lock().unwrap();
+                                                    storage.update_project(&updated_project)
+                                                };
+
+                                                // 然后处理结果
+                                                match update_result {
+                                                    Ok(_) => {
                                                         // 更新内存中的项目列表
                                                         if let Some(p) = app.projects.iter_mut().find(|p| p.id == project.id) {
                                                             *p = updated_project;
                                                         }
+                                                    }
+                                                    Err(e) => {
+                                                        app.show_error(format!("更新项目失败：{}", e));
                                                     }
                                                 }
                                             }
@@ -95,16 +104,26 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                                 .clicked()
                             {
                                 let project_id = project.id;
+                                let project_name = project.name.clone();
                                 app.show_confirmation_dialog(
                                     "删除项目".to_string(),
-                                    format!("确定要删除项目{}吗？", project.name),
-                                    Box::new(move || {
-                                        if let Ok(mut storage) = app.storage.lock() {
-                                            if let Err(e) = storage.delete_project(project_id) {
-                                                app.show_error(format!("删除项目失败：{}", e));
-                                            } else {
-                                                // 从列表中移除项目
-                                                app.projects.retain(|p| p.id != project_id);
+                                    format!("确定要删除项目{}吗？", project_name),
+                                    Box::new(move |app| {
+                                        if let Some(id) = project_id {
+                                            // 先获取删除操作的结果
+                                            let delete_result = {
+                                                let mut storage = app.storage.lock().unwrap();
+                                                storage.delete_project(id)
+                                            };
+
+                                            // 然后处理结果
+                                            match delete_result {
+                                                Ok(_) => {
+                                                    app.projects.retain(|p| p.id != Some(id));
+                                                }
+                                                Err(e) => {
+                                                    app.show_error(format!("删除项目失败：{}", e));
+                                                }
                                             }
                                         }
                                     }),
@@ -122,7 +141,7 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
         let mut project_name = String::new();
         let mut project_description = String::new();
 
-        ProjectDialog::new("添加项目").show(ui.ctx(), |ui| {
+        ProjectDialog::new("添加项目").show_custom(ui.ctx(), |ui| {
             ui.horizontal(|ui| {
                 ui.label("项目名称：");
                 ui.text_edit_singleline(&mut project_name);
@@ -157,17 +176,22 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                             updated_at: now,
                         };
                         
-                        if let Ok(mut storage) = app.storage.lock() {
-                            match storage.add_project(&new_project) {
-                                Ok(id) => {
-                                    let mut project = new_project;
-                                    project.id = Some(id);
-                                    app.projects.push(project);
-                                    app.show_add_project_dialog = false;
-                                }
-                                Err(e) => {
-                                    app.show_error(format!("添加项目失败：{}", e));
-                                }
+                        // 先执行添加操作
+                        let add_result = {
+                            let mut storage = app.storage.lock().unwrap();
+                            storage.add_project(&new_project)
+                        };
+
+                        // 然后处理结果
+                        match add_result {
+                            Ok(id) => {
+                                let mut project = new_project;
+                                project.id = Some(id);
+                                app.projects.push(project);
+                                app.show_add_project_dialog = false;
+                            }
+                            Err(e) => {
+                                app.show_error(format!("添加项目失败：{}", e));
                             }
                         }
                     }
