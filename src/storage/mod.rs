@@ -1,5 +1,3 @@
-// src/storage/mod.rs
-
 mod models;
 mod migrations;
 pub mod queries;
@@ -14,6 +12,8 @@ use r2d2::Pool;
 use crate::config;
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
+
+#[cfg(test)]
 use crate::error::TimeTrackerError;
 
 pub use models::*;
