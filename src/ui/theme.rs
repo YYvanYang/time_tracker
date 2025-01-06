@@ -1,8 +1,4 @@
-// src/ui/theme.rs
-
-use crate::config::{Config, Theme as AppTheme};
-use eframe::egui::{self, Color32, Rounding, Stroke, Style, Visuals};
-use crate::ui::TimeTrackerApp;
+use eframe::egui::{self, Color32, Stroke, Visuals};
 
 pub const SPACING: f32 = 8.0;
 pub const PADDING: f32 = 6.0;
@@ -115,28 +111,22 @@ fn is_dark_mode_enabled() -> bool {
 
 #[cfg(target_os = "macos")]
 fn is_dark_mode_enabled() -> bool {
-    use core_foundation::bundle::{CFBundle, CFBundleGetMainBundle};
+    use core_foundation::bundle::CFBundle;
     use core_foundation::string::CFString;
-    use core_foundation::base::{TCFType, CFType};
-    use core_foundation::dictionary::CFDictionary;
-    use core_foundation::number::CFNumber;
+    use core_foundation::base::TCFType;
 
-    unsafe {
-        if let Some(bundle) = CFBundle::main_bundle() {
-            if let Ok(dict) = bundle.info_dictionary() {
-                let key = CFString::from_static_string("AppleInterfaceStyle");
-                if let Some(value) = dict.find(&key as &CFType) {
-                    if let Some(string) = value.downcast::<CFString>() {
-                        return string.to_string() == "Dark";
-                    }
-                }
-            }
+    let bundle = CFBundle::main_bundle();
+    let dict = bundle.info_dictionary();
+    let key = CFString::from_static_string("AppleInterfaceStyle");
+    if let Some(value) = dict.find(&key) {
+        if let Some(string) = value.as_CFType().downcast::<CFString>() {
+            return string.to_string() == "Dark";
         }
     }
     false
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn is_dark_mode_enabled() -> bool {
     false
 }
@@ -144,7 +134,7 @@ fn is_dark_mode_enabled() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, Theme as AppTheme};
 
     #[test]
     fn test_theme_colors() {

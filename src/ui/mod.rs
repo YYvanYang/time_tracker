@@ -10,6 +10,7 @@ use crate::storage::Storage;
 use crate::app_tracker::AppTracker;
 use crate::pomodoro::PomodoroTimer;
 use crate::storage::app_state::AppStateManager;
+use crate::storage::app_state::Task;
 use crate::tray::{TrayManager, TrayEvent};
 use crate::hotkeys::HotkeyManager;
 use eframe::egui;
@@ -19,7 +20,6 @@ use crate::ui::components::Dialog as ComponentDialog;
 use crate::ui::components::dialog::{ProjectDialog, TagDialog, ExportDialog, SettingsDialog, ConfirmationDialog, AboutDialog, UpdateDialog};
 use std::collections::{HashSet, VecDeque, HashMap};
 use crate::storage::{Project, Tag, PomodoroStatus};
-use crate::error::TimeTrackerError;
 use crate::storage::app_state::AppState;
 use chrono::Duration;
 
@@ -161,7 +161,7 @@ impl TimeTrackerApp {
         &mut self,
         title: String,
         message: String,
-        on_confirm: Box<dyn FnOnce(&mut TimeTrackerApp)>,
+        on_confirm: Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()> + Send>,
     ) {
         self.push_dialog(Box::new(ConfirmationDialog {
             title,
@@ -240,7 +240,7 @@ impl eframe::App for TimeTrackerApp {
                 View::AppUsage => app_usage::render(self, ui),
                 View::Pomodoro => pomodoro::render(self, ui),
                 View::Projects => projects::render(self, ui),
-                View::Statistics => statistics::render(self, ui),
+                View::Statistics => statistics::render(self, ctx, ui),
                 View::Settings => settings::render(self, ui),
             }
         });

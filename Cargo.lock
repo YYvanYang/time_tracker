@@ -3415,6 +3415,7 @@ name = "time_tracker"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "core-foundation",
  "dirs",
  "eframe",
  "egui",
@@ -3422,6 +3423,7 @@ dependencies = [
  "log",
  "lru",
  "notify",
+ "once_cell",
  "plotters",
  "plotters-backend",
  "r2d2",

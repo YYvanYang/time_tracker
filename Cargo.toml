@@ -21,6 +21,7 @@ tray-item = "0.9"
 dirs = "5.0"
 lru = "0.12"
 rand = "0.8"
+once_cell = "1.19"
 
 # 图表绘制
 plotters = { version = "0.3", features = ["bitmap_backend", "line_series"] }
@@ -44,3 +45,6 @@ winres = "0.1"
 [dev-dependencies]
 test-log = "0.2"
 tempfile = "3.8"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"

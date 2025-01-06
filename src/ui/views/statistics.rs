@@ -1,7 +1,5 @@
-//src/ui/views/statistics.rs
-
 use eframe::egui;
-use crate::ui::{TimeTrackerApp, styles};
+use crate::ui::TimeTrackerApp;
 use super::components::{Card, Chart};
 use crate::ui::components::dialog::DateRangeDialog;
 use chrono::NaiveDate;
@@ -37,12 +35,11 @@ static SELECTED_RANGE: Lazy<Mutex<Option<TimeRange>>> = Lazy::new(|| Mutex::new(
 pub fn render(app: &mut TimeTrackerApp, ctx: &egui::Context, ui: &mut egui::Ui) {
     static mut DATE_RANGE_DIALOG: Option<DateRangeDialog> = None;
     
-    let selected_range = unsafe {
-        if SELECTED_RANGE.lock().unwrap().is_none() {
-            SELECTED_RANGE.lock().unwrap() = Some(TimeRange::LastWeek);
-        }
-        SELECTED_RANGE.lock().unwrap().as_mut().unwrap()
-    };
+    let mut selected_range = SELECTED_RANGE.lock().unwrap();
+    if selected_range.is_none() {
+        *selected_range = Some(TimeRange::LastWeek);
+    }
+    let range = selected_range.as_mut().unwrap();
 
     let date_range_dialog = unsafe {
         if DATE_RANGE_DIALOG.is_none() {
@@ -57,16 +54,16 @@ pub fn render(app: &mut TimeTrackerApp, ctx: &egui::Context, ui: &mut egui::Ui) 
     ui.horizontal(|ui| {
         ui.label("时间范围:");
         egui::ComboBox::from_id_source("time_range_selector")
-            .selected_text(selected_range.as_str())
+            .selected_text(range.as_str())
             .show_ui(ui, |ui| {
-                ui.selectable_value(selected_range, TimeRange::LastWeek, "最近一周");
-                ui.selectable_value(selected_range, TimeRange::LastMonth, "最近一个月");
-                ui.selectable_value(selected_range, TimeRange::LastThreeMonths, "最近三个月");
-                ui.selectable_value(selected_range, TimeRange::LastYear, "最近一年");
-                ui.selectable_value(selected_range, TimeRange::Custom(None), "自定义范围");
+                ui.selectable_value(range, TimeRange::LastWeek, "最近一周");
+                ui.selectable_value(range, TimeRange::LastMonth, "最近一个月");
+                ui.selectable_value(range, TimeRange::LastThreeMonths, "最近三个月");
+                ui.selectable_value(range, TimeRange::LastYear, "最近一年");
+                ui.selectable_value(range, TimeRange::Custom(None), "自定义范围");
             });
             
-        if matches!(selected_range, TimeRange::Custom(_)) {
+        if matches!(range, TimeRange::Custom(_)) {
             if ui.button("选择日期范围").clicked() {
                 date_range_dialog.open = true;
                 date_range_dialog.on_close = Some(Box::new(|result| {

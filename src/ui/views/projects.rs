@@ -120,11 +120,15 @@ pub fn render(app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                                             match delete_result {
                                                 Ok(_) => {
                                                     app.projects.retain(|p| p.id != Some(id));
+                                                    Ok(())
                                                 }
                                                 Err(e) => {
                                                     app.show_error(format!("删除项目失败：{}", e));
+                                                    Err(e)
                                                 }
                                             }
+                                        } else {
+                                            Ok(())  // 如果没有项目ID，视为成功
                                         }
                                     }),
                                 );

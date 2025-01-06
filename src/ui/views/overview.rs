@@ -1,5 +1,3 @@
-//src/ui/views/overview.rs
-
 use eframe::egui;
 use crate::ui::{TimeTrackerApp, styles};
 use super::components::{Card, ProgressBar};
@@ -56,12 +54,11 @@ pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let mut new_task = String::new();
         let response = ui.text_edit_singleline(&mut new_task);
-        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if !new_task.trim().is_empty() {
-                _app.tasks.push(Task::new(new_task));
-            }
-        }
-        if ui.button("添加任务").clicked() && !new_task.trim().is_empty() {
+        
+        let should_add = (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+            || ui.button("添加任务").clicked();
+            
+        if should_add && !new_task.trim().is_empty() {
             _app.tasks.push(Task::new(new_task));
         }
     });
@@ -73,15 +70,11 @@ pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                 ui.label("今天还没有添加任务");
             } else {
                 let mut tasks_to_remove = Vec::new();
-                
+                let mut changes_made = false;
+
                 for (index, task) in _app.tasks.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
-                        if ui.checkbox(&mut task.completed, "").changed() {
-                            // 状态改变时自动保存
-                            if let Err(e) = _app.save_state() {
-                                _app.show_error(format!("保存任务状态失败: {}", e));
-                            }
-                        }
+                        let changed = ui.checkbox(&mut task.completed, "").changed();
                         
                         if task.completed {
                             ui.label(egui::RichText::new(&task.title)
@@ -96,6 +89,10 @@ pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                                 tasks_to_remove.push(index);
                             }
                         });
+
+                        if changed {
+                            changes_made = true;
+                        }
                     });
                 }
                 
@@ -104,7 +101,8 @@ pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
                     _app.tasks.remove(index);
                 }
                 
-                if !tasks_to_remove.is_empty() {
+                // 保存所有更改
+                if changes_made || !tasks_to_remove.is_empty() {
                     if let Err(e) = _app.save_state() {
                         _app.show_error(format!("保存任务状态失败: {}", e));
                     }

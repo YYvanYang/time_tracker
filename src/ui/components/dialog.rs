@@ -1549,6 +1549,36 @@ fn date_picker(ui: &mut egui::Ui, date: &mut NaiveDate) -> Option<NaiveDate> {
     changed
 }
 
+impl DialogHandler for AboutDialog {
+    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        egui::Window::new("关于")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label("Time Tracker");
+                ui.label("版本: 0.1.0");
+                ui.label("作者: Your Name");
+                ui.separator();
+                ui.label("一个简单的时间跟踪工具");
+                !ui.button("关闭").clicked()
+            })
+            .unwrap_or(true)
+    }
+}
+
+impl DialogHandler for UpdateDialog {
+    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        egui::Window::new("检查更新")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label("正在检查更新...");
+                !ui.button("关闭").clicked()
+            })
+            .unwrap_or(true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
