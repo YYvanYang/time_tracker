@@ -20,6 +20,9 @@ pub const COLOR_TEXT: Color32 = Color32::from_rgb(240, 240, 240);
 pub const COLOR_TEXT_SECONDARY: Color32 = Color32::from_rgb(160, 160, 160);
 pub const COLOR_BACKGROUND: Color32 = Color32::from_rgb(32, 32, 32);
 pub const COLOR_SURFACE: Color32 = Color32::from_rgb(48, 48, 48);
+pub const PRIMARY_COLOR: egui::Color32 = egui::Color32::from_rgb(66, 133, 244);
+pub const GRAY_COLOR: egui::Color32 = egui::Color32::from_rgb(224, 224, 224);
+pub const GRAY: Color32 = Color32::from_gray(128);
 
 // 文本样式辅助函数
 pub fn heading() -> egui::TextStyle {

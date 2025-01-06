@@ -1,6 +1,7 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppState {
@@ -35,4 +36,13 @@ impl AppStateManager {
             auto_save,
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Project {
+    pub id: i64,
+    pub name: String,
+    pub description: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 } 

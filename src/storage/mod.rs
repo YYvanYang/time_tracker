@@ -160,7 +160,7 @@ impl Storage {
 
     /// 清理旧数据
     pub fn cleanup_old_data(&self, days: u32) -> Result<()> {
-        let mut conn = self.pool.get()?;
+        let conn = self.pool.get()?;
         let cutoff_date = Local::now() - chrono::Duration::days(days as i64);
         
         conn.execute(
@@ -303,6 +303,67 @@ impl Storage {
     pub fn execute_query(&self, query: &str) -> Result<()> {
         let conn = self.pool.get()?;
         conn.execute(query, [])?;
+        Ok(())
+    }
+
+    pub fn add_project(&mut self, project: &Project) -> Result<i64> {
+        let conn = self.pool.get()?;
+        conn.execute(
+            "INSERT INTO projects (name, description, created_at, updated_at) 
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                project.name,
+                project.description,
+                project.created_at,
+                project.updated_at,
+            ],
+        )?;
+        
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn delete_project(&mut self, project_id: i64) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
+        Ok(())
+    }
+
+    pub fn load_projects(&self) -> Result<Vec<Project>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, created_at, updated_at FROM projects"
+        )?;
+        
+        let projects = stmt.query_map([], |row| {
+            Ok(Project {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })?;
+
+        let mut result = Vec::new();
+        for project in projects {
+            result.push(project?);
+        }
+        Ok(result)
+    }
+
+    pub fn update_project(&mut self, project: &Project) -> Result<()> {
+        let conn = self.pool.get()?;
+        conn.execute(
+            "UPDATE projects 
+             SET name = ?1, description = ?2, updated_at = ?3 
+             WHERE id = ?4",
+            params![
+                project.name,
+                project.description,
+                project.updated_at,
+                project.id,
+            ],
+        )?;
         Ok(())
     }
 }

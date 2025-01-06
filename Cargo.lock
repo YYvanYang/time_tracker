@@ -696,7 +696,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
@@ -3426,6 +3425,7 @@ dependencies = [
  "plotters-backend",
  "r2d2",
  "r2d2_sqlite",
+ "rand",
  "rfd",
  "rusqlite",
  "serde",

@@ -16,11 +16,17 @@ use eframe::egui;
 use std::sync::{Arc, Mutex, mpsc::Receiver};
 use views::*;
 use crate::ui::components::Dialog as ComponentDialog;
-use crate::ui::components::dialog::{ProjectDialog, TagDialog, ExportDialog, SettingsDialog, ConfirmationDialog};
+use crate::ui::components::dialog::{ProjectDialog, TagDialog, ExportDialog, SettingsDialog, ConfirmationDialog, AboutDialog, UpdateDialog};
 use std::collections::{HashSet, VecDeque, HashMap};
 use crate::storage::{Project, Tag, PomodoroStatus};
 use crate::error::TimeTrackerError;
 use crate::storage::app_state::AppState;
+use chrono::Duration;
+
+pub struct AppUsageData {
+    pub name: String,
+    pub duration: Duration,
+}
 
 pub struct TimeTrackerApp {
     config: Arc<Mutex<Config>>,
@@ -33,6 +39,11 @@ pub struct TimeTrackerApp {
     tray_event_receiver: Receiver<TrayEvent>,
     current_project: Option<Project>,
     ui_state: UiState,
+    pub selected_time_range: usize,
+    pub usage_data: Vec<AppUsageData>,
+    pub tasks: Vec<Task>,
+    pub projects: Vec<Project>,
+    show_add_project_dialog: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -77,7 +88,7 @@ impl TimeTrackerApp {
         hotkey_manager: Arc<Mutex<HotkeyManager>>,
         tray_event_receiver: Receiver<TrayEvent>,
     ) -> Self {
-        Self {
+        let mut app = Self {
             config,
             storage,
             pomodoro_timer,
@@ -88,7 +99,31 @@ impl TimeTrackerApp {
             tray_event_receiver,
             current_project: None,
             ui_state: UiState::default(),
+            selected_time_range: 0,
+            usage_data: vec![
+                AppUsageData {
+                    name: "Visual Studio Code".to_string(),
+                    duration: Duration::hours(4),
+                },
+                AppUsageData {
+                    name: "Chrome".to_string(),
+                    duration: Duration::hours(2),
+                },
+                // 添加更多测试数据...
+            ],
+            tasks: Vec::new(),
+            projects: Vec::new(),
+            show_add_project_dialog: false,
+        };
+
+        // 加载项目列表
+        if let Ok(storage) = app.storage.lock() {
+            if let Ok(projects) = storage.load_projects() {
+                app.projects = projects;
+            }
         }
+
+        app
     }
 
     fn show_error(&mut self, error: String) {
@@ -140,7 +175,7 @@ impl TimeTrackerApp {
     }
 
     pub fn save_config(&mut self) -> Result<()> {
-        let mut config = self.config.lock()?;
+        let config = self.config.lock()?;
         config.save()?;
         Ok(())
     }
@@ -282,11 +317,11 @@ impl TimeTrackerApp {
 
                 ui.menu_button("帮助", |ui| {
                     if ui.button("关于").clicked() {
-                        // TODO: 显示关于对话框
+                        self.push_dialog(Box::new(AboutDialog::new()));
                         ui.close_menu();
                     }
                     if ui.button("检查更新").clicked() {
-                        // TODO: 检查更新
+                        self.push_dialog(Box::new(UpdateDialog::new()));
                         ui.close_menu();
                     }
                 });

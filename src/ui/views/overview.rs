@@ -3,6 +3,7 @@
 use eframe::egui;
 use crate::ui::{TimeTrackerApp, styles};
 use super::components::{Card, ProgressBar};
+use crate::storage::app_state::Task;
 
 pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
     ui.heading("今日概览");
@@ -50,9 +51,64 @@ pub fn render(_app: &mut TimeTrackerApp, ui: &mut egui::Ui) {
 
     // 显示今日任务
     ui.heading("今日任务");
+    
+    // 添加新任务的输入框
+    ui.horizontal(|ui| {
+        let mut new_task = String::new();
+        let response = ui.text_edit_singleline(&mut new_task);
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if !new_task.trim().is_empty() {
+                _app.tasks.push(Task::new(new_task));
+            }
+        }
+        if ui.button("添加任务").clicked() && !new_task.trim().is_empty() {
+            _app.tasks.push(Task::new(new_task));
+        }
+    });
+
     egui::ScrollArea::vertical()
         .auto_shrink([false; 2])
-        .show(ui, |_ui| {
-            // TODO: 显示任务列表
+        .show(ui, |ui| {
+            if _app.tasks.is_empty() {
+                ui.label("今天还没有添加任务");
+            } else {
+                let mut tasks_to_remove = Vec::new();
+                
+                for (index, task) in _app.tasks.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        if ui.checkbox(&mut task.completed, "").changed() {
+                            // 状态改变时自动保存
+                            if let Err(e) = _app.save_state() {
+                                _app.show_error(format!("保存任务状态失败: {}", e));
+                            }
+                        }
+                        
+                        if task.completed {
+                            ui.label(egui::RichText::new(&task.title)
+                                .strikethrough()
+                                .color(styles::GRAY));
+                        } else {
+                            ui.label(&task.title);
+                        }
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("🗑").clicked() {
+                                tasks_to_remove.push(index);
+                            }
+                        });
+                    });
+                }
+                
+                // 删除标记的任务
+                for &index in tasks_to_remove.iter().rev() {
+                    _app.tasks.remove(index);
+                }
+                
+                if !tasks_to_remove.is_empty() {
+                    if let Err(e) = _app.save_state() {
+                        _app.show_error(format!("保存任务状态失败: {}", e));
+                    }
+                }
+            }
         });
 }
