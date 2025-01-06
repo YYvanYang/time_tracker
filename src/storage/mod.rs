@@ -4,7 +4,7 @@ pub mod queries;
 pub mod app_state;
 
 use crate::error::Result;
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Local, NaiveDateTime};
 use rusqlite::params;
 use std::path::PathBuf;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -12,9 +12,7 @@ use r2d2::Pool;
 use crate::config;
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
-
-#[cfg(test)]
-use crate::error::TimeTrackerError;
+use crate::TimeTrackerError;
 
 pub use models::*;
 
@@ -458,6 +456,79 @@ impl Storage {
 
         Ok(tags)
     }
+
+    pub fn get_statistics(
+        &self,
+        start: DateTime<Local>,
+        end: DateTime<Local>
+    ) -> Result<Vec<(String, String)>> {
+        let conn = self.pool.get()?;
+        let mut stats = Vec::new();
+
+        // 总工作时间
+        let total_work_time: i64 = conn.query_row(
+            "SELECT SUM(duration) FROM app_usage WHERE start_time BETWEEN ?1 AND ?2",
+            params![start.to_rfc3339(), end.to_rfc3339()],
+            |row| row.get(0)
+        ).unwrap_or(0);
+
+        // 番茄钟统计
+        let pomodoro_stats: (i64, i64) = conn.query_row(
+            "SELECT 
+                COUNT(CASE WHEN status = 'Completed' THEN 1 END),
+                COUNT(CASE WHEN status = 'Interrupted' THEN 1 END)
+             FROM pomodoro_records 
+             WHERE start_time BETWEEN ?1 AND ?2",
+            params![start.to_rfc3339(), end.to_rfc3339()],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).unwrap_or((0, 0));
+
+        // 添加统计数据
+        stats.push(("总工作时间(小时)".to_string(), format!("{:.1}", total_work_time as f64 / 3600.0)));
+        stats.push(("完成的番茄钟".to_string(), pomodoro_stats.0.to_string()));
+        stats.push(("中断的番茄钟".to_string(), pomodoro_stats.1.to_string()));
+
+        Ok(stats)
+    }
+
+    pub fn update_config(&mut self, config: crate::config::StorageConfig) -> Result<()> {
+        self.config = config;
+        
+        // 确保备份目录存在
+        if !self.config.data_dir.exists() {
+            std::fs::create_dir_all(&self.config.data_dir)?;
+        }
+
+        // 如果启用了备份，检查并创建备份目录
+        if self.config.backup_enabled {
+            let backup_dir = self.config.data_dir.join("backups");
+            if !backup_dir.exists() {
+                std::fs::create_dir_all(&backup_dir)?;
+            }
+        }
+
+        // 更新数据库配置（如果需要）
+        self.pool = create_connection_pool(&self.config.data_dir)?;
+
+        Ok(())
+    }
+}
+
+// 辅助函数：创建连接池
+fn create_connection_pool(data_dir: &std::path::Path) -> Result<r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>> {
+    let db_path = data_dir.join("timetracker.db");
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(&db_path);
+    let pool = r2d2::Pool::new(manager)?;
+    
+    // 初始化连接
+    let conn = pool.get()?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA foreign_keys = ON;"
+    )?;
+
+    Ok(pool)
 }
 
 #[derive(Debug)]

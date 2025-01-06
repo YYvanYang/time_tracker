@@ -2,6 +2,7 @@ use thiserror::Error;
 use std::sync::PoisonError;
 use plotters::drawing::DrawingAreaErrorKind;
 use std::error::Error as StdError;
+use xlsxwriter::XlsxError;
 
 #[derive(Error, Debug)]
 pub enum TimeTrackerError {
@@ -43,6 +44,9 @@ pub enum TimeTrackerError {
 
     #[error("CSV error: {0}")]
     Csv(#[from] csv::Error),
+
+    #[error("Network error: {0}")]
+    Network(#[from] reqwest::Error),
 }
 
 pub type Result<T> = std::result::Result<T, TimeTrackerError>;
@@ -86,5 +90,11 @@ impl From<tray_item::TIError> for TimeTrackerError {
 impl From<notify::Error> for TimeTrackerError {
     fn from(err: notify::Error) -> Self {
         TimeTrackerError::Config(format!("File watch error: {}", err))
+    }
+}
+
+impl From<XlsxError> for TimeTrackerError {
+    fn from(err: XlsxError) -> Self {
+        TimeTrackerError::Storage(format!("Excel error: {}", err))
     }
 }

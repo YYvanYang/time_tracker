@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::Receiver;
 use eframe::egui;
+use std::future::Future;
+use std::pin::Pin;
 
 pub struct TimeTrackerApp {
     config: crate::config::Config,
@@ -50,6 +52,10 @@ impl TimeTrackerApp {
 
     pub fn get_current_project(&self) -> Option<&Project> {
         self.current_project.as_ref()
+    }
+
+    pub fn spawn_task(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>) {
+        tokio::spawn(future);
     }
 }
 

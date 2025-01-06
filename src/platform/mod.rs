@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::TimeTrackerError;
 
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
@@ -20,10 +21,10 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use self::windows::WindowsPlatform;
 
-pub fn init() -> Result<impl PlatformOperations> {
+pub fn init() -> Result<Box<dyn PlatformOperations>> {
     #[cfg(target_os = "windows")]
     {
-        Ok(WindowsPlatform::new()?)
+        Ok(Box::new(WindowsPlatform::new()?))
     }
     #[cfg(not(target_os = "windows"))]
     {

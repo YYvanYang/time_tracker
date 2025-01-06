@@ -4,6 +4,9 @@ use chrono::{DateTime, Local};
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
 use egui::Color32;
+use std::str::FromStr;
+use crate::TimeTrackerError;
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppUsageRecord {
@@ -29,8 +32,10 @@ pub struct PomodoroRecord {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PomodoroStatus {
+    InProgress,
     Completed,
     Interrupted,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,6 +337,33 @@ impl ColorExt for Color32 {
         let b = u8::from_str_radix(&hex[4..6], 16).map_err(|_| "Invalid blue component")?;
         
         Ok(Color32::from_rgb(r, g, b))
+    }
+}
+
+// 为 PomodoroStatus 实现 FromStr
+impl FromStr for PomodoroStatus {
+    type Err = TimeTrackerError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "InProgress" => Ok(PomodoroStatus::InProgress),
+            "Completed" => Ok(PomodoroStatus::Completed),
+            "Interrupted" => Ok(PomodoroStatus::Interrupted),
+            "Cancelled" => Ok(PomodoroStatus::Cancelled),
+            _ => Err(TimeTrackerError::Storage(format!("Invalid pomodoro status: {}", s))),
+        }
+    }
+}
+
+// 为 PomodoroStatus 实现 Display trait
+impl fmt::Display for PomodoroStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PomodoroStatus::InProgress => write!(f, "进行中"),
+            PomodoroStatus::Completed => write!(f, "已完成"),
+            PomodoroStatus::Interrupted => write!(f, "已中断"),
+            PomodoroStatus::Cancelled => write!(f, "已取消"),
+        }
     }
 }
 

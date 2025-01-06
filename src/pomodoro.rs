@@ -357,6 +357,38 @@ impl PomodoroTimer {
             )),
         }
     }
+
+    pub fn update_config(&mut self, config: PomodoroConfig) {
+        self.config = config;
+        // 如果当前正在工作，更新剩余时间
+        match self.state {
+            PomodoroState::Working => {
+                self.remaining_time = self.config.work_duration;
+            }
+            PomodoroState::ShortBreak => {
+                self.remaining_time = self.config.short_break_duration;
+            }
+            PomodoroState::LongBreak => {
+                self.remaining_time = self.config.long_break_duration;
+            }
+            PomodoroState::Paused(ref prev_state) => {
+                match prev_state {
+                    PreviousState::Working => {
+                        self.remaining_time = self.config.work_duration;
+                    }
+                    PreviousState::ShortBreak => {
+                        self.remaining_time = self.config.short_break_duration;
+                    }
+                    PreviousState::LongBreak => {
+                        self.remaining_time = self.config.long_break_duration;
+                    }
+                }
+            }
+            PomodoroState::Idle => {
+                self.remaining_time = self.config.work_duration;
+            }
+        }
+    }
 }
 
 #[cfg(test)]

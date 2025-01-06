@@ -1,16 +1,17 @@
 use super::Button;
 use crate::error::Result;
-use crate::ui::{styles, TimeTrackerApp, DialogHandler, DialogContext};
+use crate::ui::{self, styles, TimeTrackerApp, DialogHandler, DialogContext};
+use crate::pomodoro::PomodoroConfig;
 use eframe::egui;
 use crate::error::TimeTrackerError;
 use rfd::FileDialog;
-use chrono::{NaiveDate, Local, Datelike};
+use chrono::{NaiveDate, Local, Datelike, Timelike};
 use open;
 use std::sync::{Arc, Mutex};
 
 // 基础对话框特征
 pub trait Dialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool;
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool;
     fn validate(&self) -> Result<()> {
         Ok(())  // 默认实现
     }
@@ -53,7 +54,7 @@ impl ProjectDialog {
 }
 
 impl Dialog for ProjectDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         egui::Window::new(&self.title)
             .collapsible(false)
             .resizable(false)
@@ -154,7 +155,7 @@ impl std::fmt::Debug for TagDialog {
 }
 
 impl Dialog for TagDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         egui::Window::new("添加标签")
             .open(&mut is_open)
@@ -244,7 +245,7 @@ impl Default for ExportDialog {
 }
 
 impl Dialog for ExportDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         egui::Window::new("导出数据")
             .collapsible(false)
@@ -282,19 +283,34 @@ impl Dialog for ExportDialog {
                 // 日期范围
                 ui.label("日期范围");
                 ui.horizontal(|ui| {
-                    let mut date_picker = DateRangePicker::new();
-                    let (start_date, end_date) = date_picker.show(ui);
+                    // 显示当前选择的日期范围
+                    ui.label(format!("从 {} 到 {}",
+                        self.date_range.start.format("%Y-%m-%d"),
+                        self.date_range.end.format("%Y-%m-%d")
+                    ));
                     
-                    // 更新导出对话框的日期范围
-                    self.date_range.start = start_date.and_hms_opt(0, 0, 0)
-                        .unwrap()
-                        .and_local_timezone(chrono::Local)
-                        .unwrap();
-                    
-                    self.date_range.end = end_date.and_hms_opt(23, 59, 59)
-                        .unwrap()
-                        .and_local_timezone(chrono::Local)
-                        .unwrap();
+                    if ui.button("选择日期范围").clicked() {
+                        let mut date_picker = DateRangeDialog::new()
+                            .with_dates(
+                                self.date_range.start.date_naive(),
+                                self.date_range.end.date_naive()
+                            )
+                            .with_callback(|start, end| {
+                                // 更新导出对话框的日期范围
+                                self.date_range.start = start
+                                    .and_hms_opt(0, 0, 0)
+                                    .unwrap()
+                                    .and_local_timezone(chrono::Local)
+                                    .unwrap();
+                                
+                                self.date_range.end = end
+                                    .and_hms_opt(23, 59, 59)
+                                    .unwrap()
+                                    .and_local_timezone(chrono::Local)
+                                    .unwrap();
+                            });
+                        dialog_ctx.app.push_dialog(Box::new(date_picker));
+                    }
                 });
 
                 // 导出内容选择
@@ -366,19 +382,20 @@ impl ExportDialog {
             
             for record in records {
                 writer.write_record(&[
-                    record.timestamp.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    record.start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
                     record.app_name,
                     record.window_title,
                     record.duration.as_secs().to_string(),
                 ])?;
             }
             
-            writer.write_record(&[])?; // 空行分隔
+            // 写入空行
+            writer.write_record::<_, String>(&[])?;
         }
 
         // 导出番茄钟记录
         if self.include_pomodoros {
-            writer.write_record(&["开始时间", "结束时间", "类型", "状态"])?;
+            writer.write_record(&["开始时间", "结束时间", "状态", "备注"])?;
             
             let records = app.storage.lock().unwrap()
                 .get_pomodoro_records(self.date_range.start, self.date_range.end)?;
@@ -387,8 +404,8 @@ impl ExportDialog {
                 writer.write_record(&[
                     record.start_time.format("%Y-%m-%d %H:%M:%S").to_string(),
                     record.end_time.format("%Y-%m-%d %H:%M:%S").to_string(),
-                    record.pomodoro_type.to_string(),
                     record.status.to_string(),
+                    record.notes.as_deref().unwrap_or("").to_string(),
                 ])?;
             }
         }
@@ -446,10 +463,24 @@ impl ExportDialog {
     }
 
     fn export_excel(&self, app: &mut TimeTrackerApp) -> Result<()> {
-        use xlsxwriter::{Workbook, DateTime};
+        use xlsxwriter::Workbook;
+        use xlsxwriter::worksheet::DateTime;
+        use chrono::Timelike;
 
-        let workbook = Workbook::new(&self.path);
+        let workbook = Workbook::new(&self.path)?;
         let storage = app.storage.lock().unwrap();
+
+        // 辅助函数：将 chrono::DateTime 转换为 xlsxwriter::DateTime
+        fn to_excel_datetime(dt: chrono::DateTime<Local>) -> DateTime {
+            DateTime::new(
+                dt.year() as i16,
+                dt.month() as i8,
+                dt.day() as i8,
+                dt.hour() as i8,
+                dt.minute() as i8,
+                dt.second() as f64,
+            )
+        }
 
         // 应用使用记录工作表
         if self.include_app_usage {
@@ -468,7 +499,7 @@ impl ExportDialog {
 
             for (i, record) in records.iter().enumerate() {
                 let row = (i + 1) as u32;
-                sheet.write_datetime(row, 0, &DateTime::new(record.timestamp), None)?;
+                sheet.write_datetime(row, 0, &to_excel_datetime(record.start_time), None)?;
                 sheet.write_string(row, 1, &record.app_name, None)?;
                 sheet.write_string(row, 2, &record.window_title, None)?;
                 sheet.write_number(row, 3, record.duration.as_secs() as f64, None)?;
@@ -482,8 +513,8 @@ impl ExportDialog {
             // 写入表头
             sheet.write_string(0, 0, "开始时间", None)?;
             sheet.write_string(0, 1, "结束时间", None)?;
-            sheet.write_string(0, 2, "类型", None)?;
-            sheet.write_string(0, 3, "状态", None)?;
+            sheet.write_string(0, 2, "状态", None)?;
+            sheet.write_string(0, 3, "备注", None)?;
 
             let records = storage.get_pomodoro_records(
                 self.date_range.start, 
@@ -492,10 +523,12 @@ impl ExportDialog {
 
             for (i, record) in records.iter().enumerate() {
                 let row = (i + 1) as u32;
-                sheet.write_datetime(row, 0, &DateTime::new(record.start_time), None)?;
-                sheet.write_datetime(row, 1, &DateTime::new(record.end_time), None)?;
-                sheet.write_string(row, 2, &record.pomodoro_type.to_string(), None)?;
-                sheet.write_string(row, 3, &record.status.to_string(), None)?;
+                sheet.write_datetime(row, 0, &to_excel_datetime(record.start_time), None)?;
+                sheet.write_datetime(row, 1, &to_excel_datetime(record.end_time), None)?;
+                sheet.write_string(row, 2, &record.status.to_string(), None)?;
+                if let Some(notes) = &record.notes {
+                    sheet.write_string(row, 3, notes, None)?;
+                }
             }
         }
 
@@ -612,7 +645,7 @@ impl SettingsDialog {
 }
 
 impl Dialog for SettingsDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         let mut should_close = false;
         egui::Window::new("设置")
@@ -801,15 +834,32 @@ impl SettingsDialog {
         config.save()?;
         
         // 应用新的设置
+        #[cfg(target_os = "windows")]
         if self.general_settings.autostart {
             crate::platform::windows::set_autostart(true)?;
         } else {
             crate::platform::windows::set_autostart(false)?;
         }
+
+        #[cfg(not(target_os = "windows"))]
+        if self.general_settings.autostart {
+            log::warn!("Autostart is not supported on this platform");
+        }
         
         // 重新配置番茄钟计时器
-        let mut pomodoro_timer = app.pomodoro_timer.lock().unwrap();
-        pomodoro_timer.update_config(config.pomodoro.clone());
+        {
+            let mut pomodoro_timer = app.pomodoro_timer.lock().unwrap();
+            pomodoro_timer.set_config(PomodoroConfig {
+                work_duration: config.pomodoro.work_duration,
+                short_break_duration: config.pomodoro.short_break_duration,
+                long_break_duration: config.pomodoro.long_break_duration,
+                long_break_interval: config.pomodoro.long_break_interval,
+                auto_start_breaks: config.pomodoro.auto_start_breaks,
+                auto_start_pomodoros: config.pomodoro.auto_start_pomodoros,
+                sound_enabled: config.pomodoro.sound_enabled,
+                sound_volume: config.pomodoro.sound_volume,
+            });
+        }
         
         // 重新配置存储
         let mut storage = app.storage.lock().unwrap();
@@ -838,9 +888,9 @@ pub struct ConfirmationDialog {
 }
 
 impl Dialog for ConfirmationDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         if let Err(e) = self.validate() {
-            app.show_error(e.to_string());
+            dialog_ctx.show_error(e.to_string());
             return false;
         }
         let mut is_open = true;
@@ -857,16 +907,16 @@ impl Dialog for ConfirmationDialog {
                 ui.horizontal(|ui| {
                     if ui.button("确认").clicked() {
                         if let Some(on_confirm) = self.on_confirm.take() {
-                            if let Err(e) = on_confirm(app) {
-                                app.show_error(format!("操作失败: {}", e));
+                            if let Err(e) = on_confirm(dialog_ctx.app) {
+                                dialog_ctx.show_error(format!("操作失败: {}", e));
                             }
                         }
                         should_close = true;
                     }
                     if ui.button("取消").clicked() {
                         if let Some(on_cancel) = self.on_cancel.take() {
-                            if let Err(e) = on_cancel(app) {
-                                app.show_error(format!("操作失败: {}", e));
+                            if let Err(e) = on_cancel(dialog_ctx.app) {
+                                dialog_ctx.show_error(format!("操作失败: {}", e));
                             }
                         }
                         should_close = true;
@@ -904,7 +954,7 @@ impl std::fmt::Debug for ConfirmationDialog {
 }
 
 impl DialogHandler for ConfirmationDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         if let Err(e) = self.validate() {
             dialog_ctx.show_error(e.to_string());
             return false;
@@ -946,7 +996,7 @@ impl DialogHandler for ConfirmationDialog {
 }
 
 impl DialogHandler for ExportDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         egui::Window::new("导出数据")
             .collapsible(false)
@@ -984,19 +1034,34 @@ impl DialogHandler for ExportDialog {
                 // 日期范围
                 ui.label("日期范围");
                 ui.horizontal(|ui| {
-                    let mut date_picker = DateRangePicker::new();
-                    let (start_date, end_date) = date_picker.show(ui);
+                    // 显示当前选择的日期范围
+                    ui.label(format!("从 {} 到 {}",
+                        self.date_range.start.format("%Y-%m-%d"),
+                        self.date_range.end.format("%Y-%m-%d")
+                    ));
                     
-                    // 更新导出对话框的日期范围
-                    self.date_range.start = start_date.and_hms_opt(0, 0, 0)
-                        .unwrap()
-                        .and_local_timezone(chrono::Local)
-                        .unwrap();
-                    
-                    self.date_range.end = end_date.and_hms_opt(23, 59, 59)
-                        .unwrap()
-                        .and_local_timezone(chrono::Local)
-                        .unwrap();
+                    if ui.button("选择日期范围").clicked() {
+                        let mut date_picker = DateRangeDialog::new()
+                            .with_dates(
+                                self.date_range.start.date_naive(),
+                                self.date_range.end.date_naive()
+                            )
+                            .with_callback(|start, end| {
+                                // 更新导出对话框的日期范围
+                                self.date_range.start = start
+                                    .and_hms_opt(0, 0, 0)
+                                    .unwrap()
+                                    .and_local_timezone(chrono::Local)
+                                    .unwrap();
+                                
+                                self.date_range.end = end
+                                    .and_hms_opt(23, 59, 59)
+                                    .unwrap()
+                                    .and_local_timezone(chrono::Local)
+                                    .unwrap();
+                            });
+                        dialog_ctx.app.push_dialog(Box::new(date_picker));
+                    }
                 });
 
                 // 导出内容选择
@@ -1040,7 +1105,7 @@ impl DialogHandler for ExportDialog {
 }
 
 impl DialogHandler for SettingsDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
         egui::Window::new("设置")
             .collapsible(false)
@@ -1085,94 +1150,37 @@ impl DialogHandler for SettingsDialog {
     }
 }
 
-pub struct DateRangePicker {
-    start_date: NaiveDate,
-    end_date: NaiveDate,
-    start_popup_id: egui::Id,
-    end_popup_id: egui::Id,
+pub struct DateRangeDialog {
+    pub start_date: NaiveDate,
+    pub end_date: NaiveDate,
+    pub on_select: Option<Box<dyn FnMut(NaiveDate, NaiveDate) + Send + 'static>>,
     calendar_visible: bool,
+    editing_start: bool,
 }
 
-impl DateRangePicker {
+impl DateRangeDialog {
     pub fn new() -> Self {
-        let today = Local::now().date_naive();
         Self {
-            start_date: today - chrono::Duration::days(7),  // 默认显示最近7天
-            end_date: today,
-            start_popup_id: egui::Id::new("start_date_popup"),
-            end_popup_id: egui::Id::new("end_date_popup"),
+            start_date: chrono::Local::now().date_naive(),
+            end_date: chrono::Local::now().date_naive(),
+            on_select: None,
             calendar_visible: false,
+            editing_start: false,
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) -> (NaiveDate, NaiveDate) {
-        ui.horizontal(|ui| {
-            // 开始日期
-            ui.label("从：");
-            let mut start_date = self.start_date;
-            let start_clicked = self.date_picker_button(ui, &mut start_date, self.start_popup_id);
-            self.start_date = start_date;
-            if start_clicked {
-                self.calendar_visible = !self.calendar_visible;
-            }
-
-            ui.add_space(8.0);
-
-            // 结束日期
-            ui.label("至：");
-            let mut end_date = self.end_date;
-            let end_clicked = self.date_picker_button(ui, &mut end_date, self.end_popup_id);
-            self.end_date = end_date;
-            if end_clicked {
-                self.calendar_visible = !self.calendar_visible;
-            }
-
-            ui.add_space(16.0);
-
-            // 快捷选择按钮
-            if ui.small_button("今天").clicked() {
-                let today = Local::now().date_naive();
-                self.start_date = today;
-                self.end_date = today;
-            }
-            
-            ui.add_space(4.0);
-            
-            if ui.small_button("最近7天").clicked() {
-                self.end_date = Local::now().date_naive();
-                self.start_date = self.end_date - chrono::Duration::days(7);
-            }
-            
-            ui.add_space(4.0);
-            
-            if ui.small_button("最近30天").clicked() {
-                self.end_date = Local::now().date_naive();
-                self.start_date = self.end_date - chrono::Duration::days(30);
-            }
-        });
-
-        (self.start_date, self.end_date)
+    pub fn with_dates(mut self, start: chrono::NaiveDate, end: chrono::NaiveDate) -> Self {
+        self.start_date = start;
+        self.end_date = end;
+        self
     }
 
-    fn date_picker_button(&mut self, ui: &mut egui::Ui, date: &mut NaiveDate, popup_id: egui::Id) -> bool {
-        let mut clicked = false;
-        let button_response = ui.add(egui::Button::new(date.format("%Y-%m-%d").to_string()));
-        
-        if button_response.clicked() {
-            clicked = true;
-        }
-
-        if self.calendar_visible {
-            let popup = egui::popup::popup_below_widget(ui, popup_id, &button_response, |ui| {
-                self.show_calendar(ui, date);
-            });
-            
-            if popup.clicked_elsewhere() {
-                self.calendar_visible = false;
-            }
-        }
-
-        clicked
+    pub fn with_callback<F>(mut self, callback: F) -> Self 
+    where
+        F: FnMut(NaiveDate, NaiveDate) + Send + 'static
+    {
+        self.on_select = Some(Box::new(callback));
+        self
     }
 
     fn show_calendar(&mut self, ui: &mut egui::Ui, selected_date: &mut NaiveDate) {
@@ -1219,12 +1227,16 @@ impl DateRangePicker {
                     let is_current_month = current_day.month() == month as u32;
                     let is_selected = current_day == *selected_date;
                     
-                    let mut button = egui::Button::new(format!("{:2}", current_day.day()));
-                    
+                    let button_text = if is_current_month {
+                        egui::RichText::new(format!("{:2}", current_day.day()))
+                    } else {
+                        egui::RichText::new(format!("{:2}", current_day.day()))
+                            .color(ui.style().visuals.weak_text_color())
+                    };
+
+                    let mut button = egui::Button::new(button_text);
                     if is_selected {
                         button = button.fill(ui.style().visuals.selection.bg_fill);
-                    } else if !is_current_month {
-                        button = button.text_color(ui.style().visuals.weak_text_color());
                     }
                     
                     if ui.add(button).clicked() {
@@ -1239,355 +1251,115 @@ impl DateRangePicker {
     }
 }
 
-// 关于对话框
-pub struct AboutDialog;
-
-impl AboutDialog {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Dialog for AboutDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+impl Dialog for DateRangeDialog {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut ui::DialogContext) -> bool {
         let mut is_open = true;
-        egui::Window::new("关于")
+        let mut should_close = false;
+
+        let window = egui::Window::new("选择日期范围")
             .collapsible(false)
             .resizable(false)
-            .default_width(400.0)
-            .open(&mut is_open)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    // 应用名称和版本
-                    ui.heading("时间追踪器");
-                    ui.label(format!("版本 {}", env!("CARGO_PKG_VERSION")));
-                    
-                    ui.add_space(16.0);
-                    
-                    // 应用描述
-                    ui.label("一个简单的时间追踪工具，帮助你更好地管理时间。");
-                    
-                    ui.add_space(8.0);
-                    
-                    // 版权信息
-                    ui.label("© 2024 TimeTracker Team");
-                    
-                    ui.add_space(16.0);
-                    
-                    // 链接
-                    ui.horizontal(|ui| {
-                        if ui.link("项目主页").clicked() {
-                            if let Err(e) = open::that("https://github.com/your/timetracker") {
-                                app.show_error(format!("无法打开链接: {}", e));
-                            }
+            .default_width(300.0)
+            .open(&mut is_open);
+
+        window.show(ctx, |ui| {
+            ui.vertical(|ui| {
+                // 显示日期按钮
+                ui.horizontal(|ui| {
+                    ui.label("开始日期:");
+                    if ui.button(self.start_date.format("%Y-%m-%d").to_string()).clicked() {
+                        self.calendar_visible = true;
+                        self.editing_start = true;
+                    }
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label("结束日期:");
+                    if ui.button(self.end_date.format("%Y-%m-%d").to_string()).clicked() {
+                        self.calendar_visible = true;
+                        self.editing_start = false;
+                    }
+                });
+
+                // 显示日历
+                if self.calendar_visible {
+                    // 创建一个临时变量来存储修改后的日期
+                    let mut temp_date = if self.editing_start {
+                        self.start_date
+                    } else {
+                        self.end_date
+                    };
+
+                    // 使用临时变量显示日历
+                    self.show_calendar(ui, &mut temp_date);
+
+                    // 更新相应的日期
+                    if self.editing_start {
+                        self.start_date = temp_date;
+                    } else {
+                        self.end_date = temp_date;
+                    }
+                }
+
+                ui.add_space(8.0);
+
+                // 按钮区域
+                ui.horizontal(|ui| {
+                    if ui.button("确定").clicked() {
+                        if let Some(mut on_select) = self.on_select.take() {
+                            on_select(self.start_date, self.end_date);
                         }
-                        ui.label(" | ");
-                        if ui.link("报告问题").clicked() {
-                            if let Err(e) = open::that("https://github.com/your/timetracker/issues") {
-                                app.show_error(format!("无法打开链接: {}", e));
-                            }
+                        should_close = true;
+                    }
+                    if ui.button("取消").clicked() {
+                        if let Some(mut on_select) = self.on_select.take() {
+                            on_select(self.start_date, self.end_date);
                         }
-                    });
+                        should_close = true;
+                    }
                 });
             });
+        });
+
+        if should_close {
+            is_open = false;
+        }
+
         is_open
     }
 }
 
-// 更新检查对话框
 pub struct UpdateDialog {
-    checking: bool,
-    update_info: Option<UpdateInfo>,
-    error: Option<String>,
-}
-
-#[derive(Debug)]
-struct UpdateInfo {
-    version: String,
-    release_date: String,
-    download_url: String,
-    release_notes: String,
+    pub checking: bool,
+    pub version: Option<String>,
+    pub changelog: Option<String>,
+    pub download_url: Option<String>,
 }
 
 impl UpdateDialog {
     pub fn new() -> Self {
         Self {
             checking: true,
-            update_info: None,
-            error: None,
+            version: None,
+            changelog: None,
+            download_url: None,
         }
-    }
-
-    async fn check_update() -> Result<Option<UpdateInfo>> {
-        use reqwest;
-        use semver::Version;
-        use serde_json::Value;
-
-        // 获取当前版本
-        let current_version = Version::parse(env!("CARGO_PKG_VERSION"))?;
-
-        // 从 GitHub API 获取最新版本信息
-        let client = reqwest::Client::new();
-        let response = client
-            .get("https://api.github.com/repos/your/timetracker/releases/latest")
-            .header("User-Agent", "TimeTracker")
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(TimeTrackerError::Platform(format!(
-                "GitHub API 请求失败: {}",
-                response.status()
-            )));
-        }
-
-        let release: Value = response.json().await?;
-        
-        // 解析版本信息
-        let latest_version = release["tag_name"]
-            .as_str()
-            .ok_or_else(|| TimeTrackerError::Platform("无效的版本标签".into()))?
-            .trim_start_matches('v');
-        
-        let latest_version = Version::parse(latest_version)?;
-
-        // 比较版本
-        if latest_version <= current_version {
-            return Ok(None);
-        }
-
-        // 有新版本，返回更新信息
-        Ok(Some(UpdateInfo {
-            version: latest_version.to_string(),
-            release_date: release["published_at"]
-                .as_str()
-                .map(|d| {
-                    chrono::DateTime::parse_from_rfc3339(d)
-                        .map(|dt| dt.format("%Y-%m-%d").to_string())
-                        .unwrap_or_else(|_| "未知日期".to_string())
-                })
-                .unwrap_or_else(|| "未知日期".to_string()),
-            download_url: release["html_url"]
-                .as_str()
-                .unwrap_or("https://github.com/your/timetracker/releases")
-                .to_string(),
-            release_notes: release["body"]
-                .as_str()
-                .unwrap_or("暂无更新说明")
-                .to_string(),
-        }))
     }
 }
 
-impl Dialog for UpdateDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
-        let mut is_open = true;
-        egui::Window::new("检查更新")
-            .collapsible(false)
-            .resizable(false)
-            .default_width(400.0)
-            .open(&mut is_open)
-            .show(ctx, |ui| {
-                if self.checking {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(20.0);
-                        ui.spinner();
-                        ui.label("正在检查更新...");
-                        ui.add_space(20.0);
-                    });
-                    
-                    // 启动异步检查
-                    let ctx = ctx.clone();
-                    let update_info = Arc::new(Mutex::new(self.update_info.take()));
-                    let error = Arc::new(Mutex::new(self.error.take()));
-                    
-                    app.spawn_task(Box::pin(async move {
-                        match Self::check_update().await {
-                            Ok(info) => {
-                                *update_info.lock().unwrap() = info;
-                                ctx.request_repaint();
-                            }
-                            Err(e) => {
-                                *error.lock().unwrap() = Some(e.to_string());
-                                ctx.request_repaint();
-                            }
-                        }
-                    }));
-                    
-                    self.checking = false;
-                } else if let Some(error) = &self.error {
-                    ui.vertical_centered(|ui| {
-                        ui.label("检查更新失败");
-                        ui.label(error);
-                        if ui.button("关闭").clicked() {
-                            app.pop_dialog();
-                        }
-                    });
-                } else if let Some(update_info) = &self.update_info {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("发现新版本");
-                        ui.label(format!("版本: {}", update_info.version));
-                        ui.label(format!("发布日期: {}", update_info.release_date));
-                        
-                        ui.add_space(8.0);
-                        
-                        ui.group(|ui| {
-                            ui.label("更新内容:");
-                            ui.label(&update_info.release_notes);
-                        });
-                        
-                        ui.add_space(16.0);
-                        
-                        ui.horizontal(|ui| {
-                            if ui.button("下载更新").clicked() {
-                                if let Err(e) = open::that(&update_info.download_url) {
-                                    app.show_error(format!("无法打开下载链接: {}", e));
-                                }
-                                app.pop_dialog();
-                            }
-                            if ui.button("稍后提醒").clicked() {
-                                app.pop_dialog();
-                            }
-                        });
-                    });
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.label("您使用的已经是最新版本");
-                        if ui.button("确定").clicked() {
-                            app.pop_dialog();
-                        }
-                    });
-                }
-            });
-        is_open
-    }
+pub struct AboutDialog {
+    pub version: String,
+    pub author: String,
+    pub description: String,
 }
 
-pub struct DateRangeDialog {
-    pub open: bool,
-    pub start_date: NaiveDate,
-    pub end_date: NaiveDate,
-    pub on_close: Option<Box<dyn FnOnce(Option<(NaiveDate, NaiveDate)>)>>,
-}
-
-impl Default for DateRangeDialog {
-    fn default() -> Self {
-        let today = Local::now().date_naive();
+impl AboutDialog {
+    pub fn new() -> Self {
         Self {
-            open: false,
-            start_date: today,
-            end_date: today,
-            on_close: None,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            author: "Your Name".to_string(),
+            description: "一个简单的时间跟踪工具".to_string(),
         }
-    }
-}
-
-impl DateRangeDialog {
-    pub fn show(&mut self, ctx: &egui::Context) {
-        if !self.open {
-            return;
-        }
-
-        egui::Window::new("选择日期范围")
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                // 开始日期
-                ui.horizontal(|ui| {
-                    ui.label("开始日期:");
-                    let mut start_date = self.start_date;
-                    if let Some(date) = date_picker(ui, &mut start_date) {
-                        self.start_date = date;
-                    }
-                });
-
-                // 结束日期
-                ui.horizontal(|ui| {
-                    ui.label("结束日期:");
-                    let mut end_date = self.end_date;
-                    if let Some(date) = date_picker(ui, &mut end_date) {
-                        self.end_date = date;
-                    }
-                });
-
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("确定").clicked() {
-                        if let Some(on_close) = self.on_close.take() {
-                            on_close(Some((self.start_date, self.end_date)));
-                        }
-                        self.open = false;
-                    }
-
-                    if ui.button("取消").clicked() {
-                        if let Some(on_close) = self.on_close.take() {
-                            on_close(None);
-                        }
-                        self.open = false;
-                    }
-                });
-            });
-    }
-}
-
-fn date_picker(ui: &mut egui::Ui, date: &mut NaiveDate) -> Option<NaiveDate> {
-    let mut changed = None;
-    
-    ui.horizontal(|ui| {
-        let mut year = date.year();
-        let mut month = date.month() as i32;
-        let mut day = date.day() as i32;
-
-        ui.add(egui::DragValue::new(&mut year).clamp_range(2000..=2100));
-        ui.label("-");
-        ui.add(egui::DragValue::new(&mut month).clamp_range(1..=12));
-        ui.label("-");
-        ui.add(egui::DragValue::new(&mut day).clamp_range(1..=31));
-
-        if let Some(new_date) = NaiveDate::from_ymd_opt(year, month as u32, day as u32) {
-            if new_date != *date {
-                changed = Some(new_date);
-            }
-        }
-    });
-
-    changed
-}
-
-impl DialogHandler for AboutDialog {
-    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
-        let mut is_open = true;
-        egui::Window::new("关于")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut is_open)
-            .show(ctx, |ui| {
-                ui.label("Time Tracker");
-                ui.label("版本: 0.1.0");
-                ui.label("作者: Your Name");
-                ui.separator();
-                ui.label("一个简单的时间跟踪工具");
-                if ui.button("关闭").clicked() {
-                    is_open = false;
-                }
-            });
-        is_open
-    }
-}
-
-impl DialogHandler for UpdateDialog {
-    fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
-        egui::Window::new("检查更新")
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.label("正在检查更新...");
-                if ui.button("关闭").clicked() {
-                    is_open = false;
-                }
-            });
-        is_open
     }
 }
 
@@ -1596,6 +1368,8 @@ mod tests {
     use super::*;
     use eframe::egui::{Context, RawInput};
     use crate::ui::TimeTrackerApp;
+    use crate::config::Config;
+    use crate::storage::app_state::AppState;
     use tempfile::TempDir;
     use std::sync::{Arc, Mutex};
     use std::sync::mpsc;
@@ -1605,8 +1379,11 @@ mod tests {
         let ctx = Context::default();
         let temp_dir = TempDir::new().unwrap();
         
-        // 创建所需的组件
-        let config = Arc::new(Mutex::new(Default::default()));
+        // 创建配置
+        let config = Arc::new(Mutex::new(Config::default()));
+        
+        // 创建应用状态
+        let state = Arc::new(Mutex::new(AppState::new()));
         
         // 创建存储配置
         let storage_config = crate::storage::StorageConfig {
@@ -1640,26 +1417,28 @@ mod tests {
                 false
             ).unwrap()
         ));
-        let (tray_sender, tray_event_receiver) = mpsc::channel();
+
+        let (tray_sender, tray_receiver) = mpsc::channel();
         let tray_manager = Arc::new(Mutex::new(
             crate::tray::TrayManager::new(
                 temp_dir.path().join("tray_icon.png"),
                 tray_sender
             ).unwrap()
         ));
+
         let hotkey_manager = Arc::new(Mutex::new(
             crate::hotkeys::HotkeyManager::new(Default::default())
         ));
 
         let mut app = TimeTrackerApp::new(
-            config,
-            storage,
+            config.clone(),
+            storage.clone(),
             pomodoro_timer,
             app_tracker,
             app_state_manager,
             tray_manager,
             hotkey_manager,
-            tray_event_receiver,
+            tray_receiver,
         );
 
         let mut dialog = ConfirmationDialog {
@@ -1670,7 +1449,17 @@ mod tests {
         };
 
         ctx.run(RawInput::default(), |ctx| {
-            assert!(Dialog::show(&mut dialog, ctx, &mut app));
+            let config = config.lock().unwrap();
+            let state = state.lock().unwrap();
+            let storage = storage.lock().unwrap();
+            
+            let mut dialog_ctx = ui::DialogContext {
+                app: &mut app,
+                config: &config,
+                state: &state,
+                storage: &storage,
+            };
+            assert!(Dialog::show(&mut dialog, ctx, &mut dialog_ctx));
         });
     }
 }
