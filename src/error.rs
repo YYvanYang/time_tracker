@@ -40,6 +40,9 @@ pub enum TimeTrackerError {
 
     #[error("Drawing error: {0}")]
     Drawing(String),
+
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
 }
 
 pub type Result<T> = std::result::Result<T, TimeTrackerError>;

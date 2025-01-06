@@ -1,5 +1,3 @@
-// src/ui/components/dialog.rs
-
 use super::Button;
 use crate::error::Result;
 use crate::ui::{styles, TimeTrackerApp, DialogHandler, DialogContext};
@@ -8,10 +6,11 @@ use crate::error::TimeTrackerError;
 use rfd::FileDialog;
 use chrono::{NaiveDate, Local, Datelike};
 use open;
+use std::sync::{Arc, Mutex};
 
 // 基础对话框特征
 pub trait Dialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool;
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool;
     fn validate(&self) -> Result<()> {
         Ok(())  // 默认实现
     }
@@ -54,7 +53,7 @@ impl ProjectDialog {
 }
 
 impl Dialog for ProjectDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
         egui::Window::new(&self.title)
             .collapsible(false)
             .resizable(false)
@@ -89,7 +88,7 @@ impl Dialog for ProjectDialog {
                         .show(ui)
                         .clicked()
                     {
-                        app.pop_dialog();
+                        dialog_ctx.pop_dialog();
                     }
 
                     if Button::new("保存")
@@ -99,15 +98,15 @@ impl Dialog for ProjectDialog {
                     {
                         if let Some(on_save) = self.on_save.take() {
                             if let Err(e) = on_save(
-                                app,
+                                dialog_ctx.app,
                                 self.name.clone(),
                                 self.description.clone(),
                                 self.color,
                             ) {
-                                app.show_error(e.to_string());
+                                dialog_ctx.show_error(e.to_string());
                             }
                         }
-                        app.pop_dialog();
+                        dialog_ctx.pop_dialog();
                     }
                 });
             });
@@ -155,7 +154,7 @@ impl std::fmt::Debug for TagDialog {
 }
 
 impl Dialog for TagDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
         let mut is_open = true;
         egui::Window::new("添加标签")
             .open(&mut is_open)
@@ -185,7 +184,7 @@ impl Dialog for TagDialog {
                         .show(ui)
                         .clicked()
                     {
-                        app.pop_dialog();
+                        dialog_ctx.pop_dialog();
                     }
 
                     if Button::new("保存")
@@ -194,11 +193,11 @@ impl Dialog for TagDialog {
                         .clicked()
                     {
                         if let Some(on_save) = self.on_save.take() {
-                            if let Err(e) = on_save(app, self.name.clone(), self.color) {
-                                app.show_error(e.to_string());
+                            if let Err(e) = on_save(dialog_ctx.app, self.name.clone(), self.color) {
+                                dialog_ctx.show_error(e.to_string());
                             }
                         }
-                        app.pop_dialog();
+                        dialog_ctx.pop_dialog();
                     }
                 });
             });
@@ -245,9 +244,8 @@ impl Default for ExportDialog {
 }
 
 impl Dialog for ExportDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
         let mut is_open = true;
-        let mut should_close = false;
         egui::Window::new("导出数据")
             .collapsible(false)
             .resizable(false)
@@ -314,7 +312,7 @@ impl Dialog for ExportDialog {
                         .show(ui)
                         .clicked()
                     {
-                        app.pop_dialog();
+                        dialog_ctx.pop_dialog();
                     }
 
                     if Button::new("导出")
@@ -322,8 +320,16 @@ impl Dialog for ExportDialog {
                         .show(ui)
                         .clicked()
                     {
-                        self.export_data(app);
-                        app.pop_dialog();
+                        let result = match self.format {
+                            ExportFormat::CSV => self.export_csv(dialog_ctx.app),
+                            ExportFormat::JSON => self.export_json(dialog_ctx.app),
+                            ExportFormat::Excel => self.export_excel(dialog_ctx.app),
+                        };
+
+                        if let Err(e) = result {
+                            dialog_ctx.show_error(format!("导出失败: {}", e));
+                        }
+                        dialog_ctx.pop_dialog();
                     }
                 });
             });
@@ -346,7 +352,6 @@ impl ExportDialog {
 
     fn export_csv(&self, app: &mut TimeTrackerApp) -> Result<()> {
         use std::fs::File;
-        use std::io::Write;
         use csv::Writer;
 
         let file = File::create(&self.path)?;
@@ -607,7 +612,7 @@ impl SettingsDialog {
 }
 
 impl Dialog for SettingsDialog {
-    fn show(&mut self, ctx: &egui::Context, app: &mut TimeTrackerApp) -> bool {
+    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
         let mut is_open = true;
         let mut should_close = false;
         egui::Window::new("设置")
@@ -632,7 +637,7 @@ impl Dialog for SettingsDialog {
                             .show(ui)
                             .clicked()
                         {
-                            app.pop_dialog();
+                            dialog_ctx.pop_dialog();
                         }
 
                         if Button::new("保存")
@@ -640,8 +645,11 @@ impl Dialog for SettingsDialog {
                             .show(ui)
                             .clicked()
                         {
-                            self.save_settings(app);
-                            app.pop_dialog();
+                            if let Err(e) = self.save_settings(dialog_ctx.app) {
+                                dialog_ctx.show_error(format!("保存设置失败: {}", e));
+                            } else {
+                                dialog_ctx.pop_dialog();
+                            }
                         }
                     });
                 });
@@ -923,10 +931,8 @@ impl DialogHandler for ConfirmationDialog {
                             if let Err(e) = on_cancel(dialog_ctx.app) {
                                 dialog_ctx.show_error(e.to_string());
                             }
-                            should_close = true;
-                        } else {
-                            should_close = true;
                         }
+                        should_close = true;
                     }
                 });
             });
@@ -1218,7 +1224,7 @@ impl DateRangePicker {
                     if is_selected {
                         button = button.fill(ui.style().visuals.selection.bg_fill);
                     } else if !is_current_month {
-                        button = button.fill_fg_color(ui.style().visuals.weak_text_color());
+                        button = button.text_color(ui.style().visuals.weak_text_color());
                     }
                     
                     if ui.add(button).clicked() {
@@ -1329,7 +1335,7 @@ impl UpdateDialog {
             .await?;
 
         if !response.status().is_success() {
-            return Err(TimeTrackerError::Network(format!(
+            return Err(TimeTrackerError::Platform(format!(
                 "GitHub API 请求失败: {}",
                 response.status()
             )));
@@ -1340,7 +1346,7 @@ impl UpdateDialog {
         // 解析版本信息
         let latest_version = release["tag_name"]
             .as_str()
-            .ok_or_else(|| TimeTrackerError::Parse("无效的版本标签".into()))?
+            .ok_or_else(|| TimeTrackerError::Platform("无效的版本标签".into()))?
             .trim_start_matches('v');
         
         let latest_version = Version::parse(latest_version)?;
@@ -1551,18 +1557,22 @@ fn date_picker(ui: &mut egui::Ui, date: &mut NaiveDate) -> Option<NaiveDate> {
 
 impl DialogHandler for AboutDialog {
     fn show(&mut self, ctx: &egui::Context, _dialog_ctx: &mut DialogContext) -> bool {
+        let mut is_open = true;
         egui::Window::new("关于")
             .collapsible(false)
             .resizable(false)
+            .open(&mut is_open)
             .show(ctx, |ui| {
                 ui.label("Time Tracker");
                 ui.label("版本: 0.1.0");
                 ui.label("作者: Your Name");
                 ui.separator();
                 ui.label("一个简单的时间跟踪工具");
-                !ui.button("关闭").clicked()
-            })
-            .unwrap_or(true)
+                if ui.button("关闭").clicked() {
+                    is_open = false;
+                }
+            });
+        is_open
     }
 }
 
@@ -1573,9 +1583,11 @@ impl DialogHandler for UpdateDialog {
             .resizable(false)
             .show(ctx, |ui| {
                 ui.label("正在检查更新...");
-                !ui.button("关闭").clicked()
-            })
-            .unwrap_or(true)
+                if ui.button("关闭").clicked() {
+                    is_open = false;
+                }
+            });
+        is_open
     }
 }
 
@@ -1661,4 +1673,14 @@ mod tests {
             assert!(Dialog::show(&mut dialog, ctx, &mut app));
         });
     }
+}
+
+#[cfg(target_os = "windows")]
+fn set_autostart(enabled: bool) -> Result<()> {
+    crate::platform::windows::set_autostart(enabled)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_autostart(_enabled: bool) -> Result<()> {
+    Ok(())
 }

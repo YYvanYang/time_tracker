@@ -377,21 +377,17 @@ impl TimeTrackerApp {
     fn show_dialogs(&mut self, ctx: &egui::Context) {
         let mut dialog_closed = false;
         
-        // 先克隆需要的数据
-        let config = self.config.clone();
-        let app_state_manager = self.app_state_manager.clone();
-        let storage = self.storage.clone();
-        
         if let Some(dialog) = self.ui_state.dialog_stack.last_mut() {
-            let config_guard = config.lock().unwrap();
-            let state_manager_guard = app_state_manager.lock().unwrap();
+            let config_guard = self.config.lock().unwrap();
+            let state_manager_guard = self.app_state_manager.lock().unwrap();
             let state = state_manager_guard.get_state().unwrap();
-            let storage_guard = storage.lock().unwrap();
+            let storage_guard = self.storage.lock().unwrap();
             
             let mut dialog_context = DialogContext {
                 config: &*config_guard,
                 state: &state,
                 storage: &*storage_guard,
+                app: self,
             };
 
             if !dialog.show(ctx, &mut dialog_context) {
@@ -432,6 +428,7 @@ impl TimeTrackerApp {
             config: &*config_guard,
             state: &state,
             storage: &*storage_guard,
+            app: self,
         };
 
         if !dialog.show(ctx, &mut dialog_context) {
@@ -546,6 +543,17 @@ pub struct DialogContext<'a> {
     pub config: &'a Config,
     pub state: &'a AppState,
     pub storage: &'a Storage,
+    pub app: &'a mut TimeTrackerApp,
+}
+
+impl<'a> DialogContext<'a> {
+    pub fn show_error(&mut self, error: String) {
+        self.app.show_error(error);
+    }
+
+    pub fn pop_dialog(&mut self) {
+        self.app.pop_dialog();
+    }
 }
 
 // 修改 DialogHandler trait 以适应新的 DialogContext

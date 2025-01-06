@@ -4,7 +4,7 @@ pub mod queries;
 pub mod app_state;
 
 use crate::error::Result;
-use chrono::{DateTime, Local, NaiveDateTime};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use rusqlite::params;
 use std::path::PathBuf;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -365,6 +365,98 @@ impl Storage {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn get_app_usage_records(
+        &self,
+        start: DateTime<Local>,
+        end: DateTime<Local>
+    ) -> Result<Vec<AppUsageRecord>> {
+        let conn = self.pool.get()?;
+        
+        let mut stmt = conn.prepare(
+            "SELECT id, app_name, window_title, start_time, duration, category, is_productive 
+             FROM app_usage 
+             WHERE start_time BETWEEN ?1 AND ?2 
+             ORDER BY start_time DESC"
+        )?;
+
+        let records = stmt.query_map(
+            params![start.to_rfc3339(), end.to_rfc3339()],
+            |row| Ok(AppUsageRecord {
+                id: row.get(0)?,
+                app_name: row.get(1)?,
+                window_title: row.get(2)?,
+                start_time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                    .unwrap()
+                    .with_timezone(&Local),
+                duration: Duration::from_secs(row.get::<_, i64>(4)? as u64),
+                category: row.get(5)?,
+                is_productive: row.get(6)?,
+            })
+        )?;
+
+        records.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(TimeTrackerError::Database)
+    }
+
+    pub fn get_pomodoro_records(
+        &self,
+        start: DateTime<Local>,
+        end: DateTime<Local>
+    ) -> Result<Vec<PomodoroRecord>> {
+        let conn = self.pool.get()?;
+        
+        let mut stmt = conn.prepare(
+            "SELECT id, start_time, end_time, status, notes, project_id 
+             FROM pomodoro_records 
+             WHERE start_time BETWEEN ?1 AND ?2 
+             ORDER BY start_time DESC"
+        )?;
+
+        let records = stmt.query_map(
+            params![start.to_rfc3339(), end.to_rfc3339()],
+            |row| Ok(PomodoroRecord {
+                id: row.get(0)?,
+                start_time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(1)?)
+                    .unwrap()
+                    .with_timezone(&Local),
+                end_time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
+                    .unwrap()
+                    .with_timezone(&Local),
+                status: row.get::<_, String>(3)?.parse().unwrap(),
+                notes: row.get(4)?,
+                project_id: row.get(5)?,
+                tags: Vec::new(), // 标签需要单独查询
+            })
+        )?;
+
+        let mut result = records.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(TimeTrackerError::Database)?;
+
+        // 加载每个记录的标签
+        for record in &mut result {
+            if let Some(id) = record.id {
+                record.tags = self.get_pomodoro_tags(id)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn get_pomodoro_tags(&self, pomodoro_id: i64) -> Result<Vec<String>> {
+        let conn = self.pool.get()?;
+        let mut stmt = conn.prepare(
+            "SELECT t.name FROM tags t
+             INNER JOIN pomodoro_tags pt ON pt.tag_id = t.id
+             WHERE pt.pomodoro_id = ?"
+        )?;
+
+        let tags = stmt.query_map([pomodoro_id], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(TimeTrackerError::Database)?;
+
+        Ok(tags)
     }
 }
 
