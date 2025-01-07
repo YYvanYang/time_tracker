@@ -10,7 +10,7 @@ pub struct WindowInfo {
     pub window_title: String,
 }
 
-pub trait PlatformOperations: Send {
+pub trait PlatformOperations: Send + 'static {
     fn get_active_window(&self) -> Result<WindowInfo>;
     fn set_autostart(&self, enabled: bool) -> Result<()>;
     fn is_autostart_enabled(&self) -> Result<bool>;
@@ -21,7 +21,7 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub use self::windows::WindowsPlatform;
 
-pub fn init() -> Result<Box<dyn PlatformOperations>> {
+pub fn init() -> Result<Box<dyn PlatformOperations + Send>> {
     #[cfg(target_os = "windows")]
     {
         Ok(Box::new(WindowsPlatform::new()?))

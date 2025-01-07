@@ -1,8 +1,8 @@
 use eframe::egui;
 use crate::ui::TimeTrackerApp;
 use super::components::{Card, Chart};
-use crate::ui::components::dialog::DateRangeDialog;
-use chrono::NaiveDate;
+use crate::ui::dialogs::DateRangeDialog;
+use chrono::{DateTime, Local};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
@@ -12,7 +12,7 @@ enum TimeRange {
     LastMonth,
     LastThreeMonths,
     LastYear,
-    Custom(Option<(NaiveDate, NaiveDate)>),
+    Custom(Option<(DateTime<Local>, DateTime<Local>)>),
 }
 
 impl TimeRange {

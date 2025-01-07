@@ -84,7 +84,7 @@ impl AppTracker {
             last_check: Arc::new(Mutex::new(Instant::now())),
             storage: Arc::new(Mutex::new(Vec::new())),
             last_active: Arc::new(Mutex::new(Instant::now())),
-            platform: Arc::new(Mutex::new(Some(Box::new(platform)))),
+            platform: Arc::new(Mutex::new(Some(platform))),
         })
     }
 
