@@ -492,7 +492,7 @@ impl Storage {
     }
 
     pub fn update_config(&mut self, config: crate::config::StorageConfig) -> Result<()> {
-        self.config = config;
+        self.config = config.into();  // 使用 From trait 进行转换
         
         // 确保备份目录存在
         if !self.config.data_dir.exists() {
@@ -507,7 +507,7 @@ impl Storage {
             }
         }
 
-        // 更新数据库配置（如果需要）
+        // 更新数据库配置
         self.pool = create_connection_pool(&self.config.data_dir)?;
 
         Ok(())
@@ -541,8 +541,8 @@ pub struct StorageHealth {
     pub needs_vacuum: bool,
 }
 
-impl From<config::StorageConfig> for StorageConfig {
-    fn from(config: config::StorageConfig) -> Self {
+impl From<crate::config::StorageConfig> for StorageConfig {
+    fn from(config: crate::config::StorageConfig) -> Self {
         Self {
             data_dir: config.data_dir,
             backup_enabled: config.backup_enabled,
