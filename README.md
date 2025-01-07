@@ -35,6 +35,12 @@
 - 多语言支持
 - 主题切换
 
+### 🔌 插件系统
+- 可扩展的插件架构
+- 自定义数据分析插件
+- 第三方服务集成
+- 自定义导出格式
+
 ## 安装
 
 ### Windows
@@ -58,9 +64,23 @@ yay -S timetracker
 
 ### 从源码编译
 ```bash
+# 安装 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 安装系统依赖
+## macOS
+brew install sqlite3
+
+## Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
 # 克隆仓库
 git clone https://github.com/yourusername/timetracker.git
 cd timetracker
+
+# 安装开发工具
+cargo install cargo-watch cargo-audit cargo-make
 
 # 编译
 cargo build --release
@@ -174,13 +194,41 @@ cargo fmt
 ```
 src/
 ├── main.rs           # 程序入口
-├── app_tracker.rs    # 应用追踪
-├── pomodoro.rs      # 番茄钟
-├── storage/         # 数据存储
-├── ui/              # 用户界面
-├── analysis/        # 数据分析
-└── ...
+├── lib.rs            # 库入口
+├── core/             # 核心模块
+│   ├── models.rs     # 核心模型
+│   ├── traits.rs     # 核心特征
+│   └── error.rs      # 错误处理
+├── domain/           # 领域层
+│   ├── activity.rs   # 活动领域
+│   ├── pomodoro.rs   # 番茄钟领域
+│   ├── project.rs    # 项目领域
+│   ├── plugin.rs     # 插件领域
+│   └── analysis.rs   # 分析领域
+├── application/      # 应用层
+├── infrastructure/   # 基础设施层
+│   ├── platform/     # 平台特定实现
+│   ├── config.rs     # 配置管理
+│   └── logging.rs    # 日志系统
+├── plugins/          # 插件系统
+└── presentation/     # 展示层
 ```
+
+项目采用领域驱动设计(DDD)架构，通过清晰的分层设计提供更好的可维护性和扩展性。
+
+## 技术架构
+
+### 核心特性
+- 领域驱动设计(DDD)架构
+- 插件化系统设计
+- 跨平台支持（Windows/macOS）
+- 模块化的代码组织
+
+### 技术栈
+- 语言：Rust
+- GUI：egui
+- 存储：SQLite
+- 跨平台：特定平台API抽象
 
 ## 贡献指南
 
@@ -235,3 +283,88 @@ A: 在设置中选择"恢复备份"，然后选择备份文件即可。
 
 ---
 Made with ❤️ in Rust
+
+## 插件开发
+
+TimeTracker 提供了强大的插件系统，允许开发者扩展和定制功能。
+
+### 插件类型
+- 数据分析插件：自定义数据分析和可视化
+- 导出插件：支持自定义导出格式
+- 集成插件：与第三方服务集成
+- 界面插件：自定义UI组件
+
+### 创建插件
+1. 创建新的 Rust 项目
+2. 添加依赖
+```toml
+[dependencies]
+timetracker-plugin = { git = "https://github.com/yourusername/timetracker" }
+```
+
+3. 实现插件特征
+```rust
+use timetracker_plugin::Plugin;
+
+#[derive(Default)]
+struct MyPlugin;
+
+impl Plugin for MyPlugin {
+    fn name(&self) -> &str {
+        "my_plugin"
+    }
+
+    fn on_load(&self) -> Result<(), Box<dyn Error>> {
+        // 插件初始化逻辑
+        Ok(())
+    }
+}
+```
+
+4. 构建和安装
+```bash
+cargo build --release
+cp target/release/libmy_plugin.* ~/.timetracker/plugins/
+```
+
+### 插件配置
+在配置文件中启用插件：
+```json
+{
+  "plugins": {
+    "enabled": ["my_plugin"],
+    "settings": {
+      "my_plugin": {
+        "option1": "value1"
+      }
+    }
+  }
+}
+```
+
+## 开发环境设置
+
+### 推荐的开发工具
+- VS Code 或 RustRover
+- rust-analyzer 插件
+- LLDB 调试器
+- SQLite 浏览器
+
+### 代码风格
+- 遵循 Rust 标准代码风格
+- 使用 rustfmt 格式化代码
+- 使用 clippy 进行代码检查
+- 编写单元测试和集成测试
+
+### 调试技巧
+```bash
+# 启用详细日志
+RUST_LOG=debug cargo run
+
+# 运行特定测试
+cargo test test_name -- --nocapture
+
+# 性能分析
+cargo install flamegraph
+cargo flamegraph
+```
