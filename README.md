@@ -1,4 +1,4 @@
- # Time Tracker
+# Time Tracker
 
 > 基于 Rust 开发的高效工作时间追踪器，助你提升工作效率，实现目标管理。
 
@@ -44,6 +44,14 @@
 
 ## 🚀 快速开始
 
+### 系统要求
+- Rust 1.70.0 或更高版本
+- SQLite 3.x
+- 支持的操作系统：
+  - Windows 10/11
+  - macOS 10.15+
+  - Linux (主流发行版)
+
 ### 下载安装
 
 ```bash
@@ -54,7 +62,8 @@ brew install timetracker
 winget install timetracker
 
 # Linux
-sudo apt install timetracker
+sudo apt install timetracker  # Ubuntu/Debian
+yay -S timetracker           # Arch Linux
 ```
 
 ### 源码编译
@@ -62,6 +71,14 @@ sudo apt install timetracker
 ```bash
 # 安装 Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 安装系统依赖
+## macOS
+brew install sqlite3
+
+## Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y libsqlite3-dev pkg-config
 
 # 克隆编译
 git clone https://github.com/yourusername/timetracker.git
@@ -83,15 +100,15 @@ cargo install --path .
 - 统计：数据分析
 
 ### 快捷键
-| 功能 | 快捷键 |
-|------|--------|
-| 开始/暂停 | `Ctrl+Space` |
-| 休息 | `Ctrl+B` |
-| 切换视图 | `Ctrl+1-4` |
+| 功能 | Windows/Linux | macOS |
+|------|--------------|-------|
+| 开始/暂停 | `Ctrl+Space` | `⌘+Space` |
+| 休息 | `Ctrl+B` | `⌘+B` |
+| 切换视图 | `Ctrl+1-4` | `⌘+1-4` |
 
 ## 🔧 配置说明
 
-### 配置文件
+### 配置文件位置
 ```
 Windows: %APPDATA%\TimeTracker\config.json
 macOS:   ~/Library/Application Support/TimeTracker/config.json
@@ -105,8 +122,13 @@ Linux:   ~/.config/timetracker/config.json
     "language": "zh-CN",
     "theme": "auto"
   },
+  "database": {
+    "url": "sqlite://timetracker.db",
+    "pool_size": 5
+  },
   "tracking": {
-    "idle_threshold": 180
+    "idle_threshold": 180,
+    "sync_interval": 60
   },
   "pomodoro": {
     "work_duration": 25,
@@ -120,8 +142,14 @@ Linux:   ~/.config/timetracker/config.json
 ### 技术架构
 - DDD 架构设计
 - 插件化系统
-- 响应式 GUI
+- 异步运行时
 - 跨平台支持
+
+### 技术栈
+- 核心：Rust + Tokio 异步运行时
+- GUI：eframe (egui framework)
+- 数据库：SQLx + SQLite
+- 系统集成：tray-item
 
 ### 目录结构
 ```
@@ -134,9 +162,16 @@ src/
 └── presentation/  # 界面层
 ```
 
-### 开发流程
+### 开发环境设置
 ```bash
-# 开发环境
+# 安装开发工具
+cargo install cargo-watch cargo-audit sqlx-cli
+
+# 数据库迁移
+sqlx database create
+sqlx migrate run
+
+# 开发模式运行
 cargo watch -x run
 
 # 测试
@@ -149,7 +184,8 @@ cargo clippy && cargo fmt
 ### 插件开发
 
 ```rust
-use timetracker_plugin::Plugin;
+use time_tracker_plugin::Plugin;
+use anyhow::Result;
 
 #[derive(Default)]
 pub struct MyPlugin;
@@ -164,11 +200,11 @@ impl Plugin for MyPlugin {
 
 ### 性能相关
 Q: CPU 占用较高？  
-A: 调整采样间隔，关闭不需要的插件。
+A: 调整配置中的 `sync_interval` 和 `idle_threshold` 参数。
 
 ### 数据安全
 Q: 如何备份数据？  
-A: 支持本地备份和云端同步。
+A: 数据库文件位于配置目录中，可以直接备份该文件。
 
 ## 🤝 参与贡献
 
@@ -185,9 +221,10 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ## 🙏 致谢
 
-- [egui](https://github.com/emilk/egui) - GUI 框架
-- [rusqlite](https://github.com/rusqlite/rusqlite) - SQLite 支持
-- [plotters](https://github.com/plotters-rs/plotters) - 数据可视化
+- [eframe](https://github.com/emilk/egui) - GUI 框架
+- [SQLx](https://github.com/launchbadge/sqlx) - 异步 SQL 工具包
+- [Tokio](https://github.com/tokio-rs/tokio) - 异步运行时
+- [tray-item](https://github.com/olback/tray-item-rs) - 系统托盘支持
 
 ## 📬 联系我们
 
