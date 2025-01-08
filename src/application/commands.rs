@@ -1,6 +1,7 @@
 use crate::application::events::{AppEvent, EventBus};
 use crate::application::services::ServiceContainer;
 use crate::core::{AppError, AppResult};
+use crate::core::models::Project;
 use crate::infrastructure::config::Config;
 use crate::plugins::PluginRegistry;
 use std::sync::Arc;
@@ -97,5 +98,24 @@ impl CommandHandler {
         } else {
             self.show_window().await
         }
+    }
+
+    pub async fn create_project(&self, name: String, description: Option<String>) -> AppResult<Project> {
+        let project = Project::new(name, description);
+        self.services.storage.save_project(&project).await?;
+        self.event_bus.publish(AppEvent::ProjectCreated(project.clone()));
+        Ok(project)
+    }
+
+    pub async fn update_project(&self, project: Project) -> AppResult<()> {
+        self.services.storage.update_project(&project).await?;
+        self.event_bus.publish(AppEvent::ProjectUpdated(project));
+        Ok(())
+    }
+
+    pub async fn delete_project(&self, project: Project) -> AppResult<()> {
+        self.services.storage.delete_project(project.id.unwrap()).await?;
+        self.event_bus.publish(AppEvent::ProjectDeleted(project));
+        Ok(())
     }
 } 

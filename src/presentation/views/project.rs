@@ -112,45 +112,37 @@ impl ProjectView {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let input_row = Row::new()
-            .push(
-                TextInput::new("项目名称", &self.name_input)
-                    .on_input(Message::NameChanged)
-                    .padding(10),
-            )
-            .push(
-                TextInput::new("描述", &self.description_input)
-                    .on_input(Message::DescriptionChanged)
-                    .padding(10),
-            )
-            .spacing(10);
-
-        let control_row = Row::new()
-            .push(
-                Button::new(Text::new("创建项目"))
-                    .on_press(Message::CreateProject)
-                    .padding(10),
-            )
-            .spacing(10);
-
-        let project_list = Scrollable::new(
-            Column::new()
-                .push(Text::new("项目列表").size(20))
-                .push(Space::with_height(Length::Units(10)))
-                .push(self.project_list())
-                .spacing(10),
-        );
-
         let content = Column::new()
-            .push(input_row)
-            .push(control_row)
-            .push(project_list)
-            .spacing(20)
-            .padding(20);
+            .push(Text::new("项目管理").size(24))
+            .push(Space::with_height(Length::Fixed(20.0)))
+            .push(
+                Row::new()
+                    .push(
+                        TextInput::new("项目名称", &self.name_input)
+                            .on_input(Message::NameChanged)
+                            .width(Length::Fixed(200.0))
+                    )
+                    .push(Space::with_width(Length::Fixed(10.0)))
+                    .push(
+                        TextInput::new("项目描述", &self.description_input)
+                            .on_input(Message::DescriptionChanged)
+                            .width(Length::Fixed(300.0))
+                    )
+                    .push(Space::with_width(Length::Fixed(10.0)))
+                    .push(
+                        Button::new(Text::new("创建"))
+                            .on_press(Message::CreateProject)
+                            .style(iced::theme::Button::Primary)
+                    )
+            )
+            .push(Space::with_height(Length::Fixed(20.0)))
+            .push(self.project_list())
+            .spacing(10);
 
         Container::new(content)
             .width(Length::Fill)
             .height(Length::Fill)
+            .padding(20)
             .into()
     }
 
@@ -166,24 +158,19 @@ impl ProjectView {
         column.into()
     }
 
-    fn project_item(&self, project: &Project) -> Element<Message> {
+    fn project_item<'a>(&'a self, project: &'a Project) -> Element<'a, Message> {
         Row::new()
             .push(Text::new(&project.name))
             .push(Space::with_width(Length::Fill))
             .push(
-                Button::new(Text::new("选择"))
-                    .on_press(Message::SelectProject(project.clone()))
-                    .padding(5),
-            )
-            .push(
                 Button::new(Text::new("编辑"))
                     .on_press(Message::EditProject(project.clone()))
-                    .padding(5),
+                    .style(iced::theme::Button::Secondary)
             )
             .push(
                 Button::new(Text::new("删除"))
                     .on_press(Message::DeleteProject(project.clone()))
-                    .padding(5),
+                    .style(iced::theme::Button::Destructive)
             )
             .spacing(10)
             .into()

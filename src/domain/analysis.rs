@@ -1,224 +1,96 @@
-use crate::core::{AppResult, models::*};
-use crate::core::traits::Storage;
-use chrono::{DateTime, Local, Duration as ChronoDuration, Datelike, Timelike};
-use std::sync::Arc;
+use crate::core::models::{Activity, PomodoroSession};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 
-pub struct AnalysisManager {
-    storage: Arc<dyn Storage>,
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProductivityStats {
+    pub total_time: std::time::Duration,
+    pub productive_time: std::time::Duration,
+    pub unproductive_time: std::time::Duration,
+    pub productivity_score: f64,
 }
 
-impl AnalysisManager {
-    pub fn new(storage: Arc<dyn Storage>) -> Self {
-        Self { storage }
-    }
-
-    pub async fn get_daily_summary(&self, date: DateTime<Local>) -> AppResult<DailySummary> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap()
-            .and_local_timezone(Local).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap()
-            .and_local_timezone(Local).unwrap();
-
-        let activities = self.storage.get_activities(start, end).await?;
-        let pomodoros = self.storage.get_pomodoro_sessions(start, end).await?;
-
-        let total_work_time = activities.iter()
-            .filter(|a| a.is_productive)
-            .fold(Duration::from_secs(0), |acc, a| acc + a.duration);
-
-        let total_break_time = activities.iter()
-            .filter(|a| !a.is_productive)
-            .fold(Duration::from_secs(0), |acc, a| acc + a.duration);
-
-        let completed_pomodoros = pomodoros.iter()
-            .filter(|p| matches!(p.status, PomodoroStatus::Completed))
-            .count();
-
-        let productivity_score = if total_work_time.as_secs() + total_break_time.as_secs() > 0 {
-            total_work_time.as_secs_f64() / (total_work_time.as_secs_f64() + total_break_time.as_secs_f64())
-        } else {
-            0.0
-        };
-
-        Ok(DailySummary {
-            date,
-            total_work_time,
-            total_break_time,
-            completed_pomodoros,
-            productivity_score,
-        })
-    }
-
-    pub async fn get_weekly_summary(&self) -> AppResult<WeeklySummary> {
-        let now = Local::now();
-        let start = now.date_naive().and_hms_opt(0, 0, 0).unwrap()
-            .and_local_timezone(Local).unwrap() - ChronoDuration::days(7);
-        let end = now;
-
-        let mut daily_summaries = Vec::new();
-        let mut current = start;
-
-        while current <= end {
-            daily_summaries.push(self.get_daily_summary(current).await?);
-            current = current + ChronoDuration::days(1);
-        }
-
-        let total_work_time = daily_summaries.iter()
-            .fold(Duration::from_secs(0), |acc, s| acc + s.total_work_time);
-
-        let total_break_time = daily_summaries.iter()
-            .fold(Duration::from_secs(0), |acc, s| acc + s.total_break_time);
-
-        let completed_pomodoros = daily_summaries.iter()
-            .fold(0, |acc, s| acc + s.completed_pomodoros);
-
-        let avg_productivity_score = daily_summaries.iter()
-            .fold(0.0, |acc, s| acc + s.productivity_score) / daily_summaries.len() as f64;
-
-        Ok(WeeklySummary {
-            start_date: start,
-            end_date: end,
-            daily_summaries,
-            total_work_time,
-            total_break_time,
-            completed_pomodoros,
-            avg_productivity_score,
-        })
-    }
-
-    pub async fn get_productivity_by_hour(&self, date: DateTime<Local>) -> AppResult<HashMap<u32, f64>> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap()
-            .and_local_timezone(Local).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap()
-            .and_local_timezone(Local).unwrap();
-
-        let activities = self.storage.get_activities(start, end).await?;
-        let mut productivity_by_hour = HashMap::new();
-
+impl ProductivityStats {
+    pub fn calculate(activities: &[Activity]) -> Self {
+        let mut stats = Self::default();
+        
         for activity in activities {
-            let hour = activity.start_time.hour();
-            let entry = productivity_by_hour.entry(hour).or_insert(0.0);
+            stats.total_time += activity.duration;
             if activity.is_productive {
-                *entry += activity.duration.as_secs_f64();
+                stats.productive_time += activity.duration;
+            } else {
+                stats.unproductive_time += activity.duration;
             }
         }
-
-        // 将秒数转换为小时的百分比
-        for value in productivity_by_hour.values_mut() {
-            *value = *value / 3600.0;
+        
+        if !stats.total_time.is_zero() {
+            stats.productivity_score = stats.productive_time.as_secs_f64() / stats.total_time.as_secs_f64() * 100.0;
         }
-
-        Ok(productivity_by_hour)
-    }
-
-    pub async fn get_activity_distribution(&self, date: DateTime<Local>) -> AppResult<HashMap<String, Duration>> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap()
-            .and_local_timezone(Local).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap()
-            .and_local_timezone(Local).unwrap();
-
-        let activities = self.storage.get_activities(start, end).await?;
-        let mut distribution = HashMap::new();
-
-        for activity in activities {
-            let category = activity.category.unwrap_or_else(|| "未分类".to_string());
-            let entry = distribution.entry(category).or_insert(Duration::from_secs(0));
-            *entry += activity.duration;
-        }
-
-        Ok(distribution)
-    }
-
-    pub async fn get_project_stats(&self, project_id: i64) -> AppResult<ProjectStats> {
-        let now = Local::now();
-        let start = now.date_naive().and_hms_opt(0, 0, 0).unwrap()
-            .and_local_timezone(Local).unwrap() - ChronoDuration::days(30);
-        let end = now;
-
-        let activities = self.storage.get_project_activities(project_id, start, end).await?;
-        let pomodoros = self.storage.get_project_pomodoro_sessions(project_id, start, end).await?;
-
-        let total_time = activities.iter()
-            .fold(Duration::from_secs(0), |acc, a| acc + a.duration);
-
-        let productive_time = activities.iter()
-            .filter(|a| a.is_productive)
-            .fold(Duration::from_secs(0), |acc, a| acc + a.duration);
-
-        let completed_pomodoros = pomodoros.iter()
-            .filter(|p| matches!(p.status, PomodoroStatus::Completed))
-            .count();
-
-        Ok(ProjectStats {
-            project_id,
-            total_time,
-            productive_time,
-            completed_pomodoros,
-            period_start: start,
-            period_end: end,
-        })
+        
+        stats
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mockall::mock;
-    use mockall::predicate::*;
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CategoryStats {
+    pub category: String,
+    pub total_time: std::time::Duration,
+    pub activity_count: usize,
+}
 
-    mock! {
-        Storage {}
-        #[async_trait::async_trait]
-        impl Storage for Storage {
-            async fn get_activities(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>>;
-            async fn get_pomodoro_sessions(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>>;
-            async fn get_project_activities(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>>;
-            async fn get_project_pomodoro_sessions(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>>;
+impl CategoryStats {
+    pub fn calculate(activities: &[Activity]) -> Vec<Self> {
+        let mut category_map: HashMap<String, CategoryStats> = HashMap::new();
+        
+        for activity in activities {
+            let stats = category_map.entry(activity.category.clone()).or_default();
+            stats.category = activity.category.clone();
+            stats.total_time += activity.duration;
+            stats.activity_count += 1;
         }
+        
+        let mut stats: Vec<_> = category_map.into_values().collect();
+        stats.sort_by(|a, b| b.total_time.cmp(&a.total_time));
+        stats
     }
+}
 
-    #[tokio::test]
-    async fn test_daily_summary() -> AppResult<()> {
-        let mut mock_storage = MockStorage::new();
-        let now = Local::now();
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PomodoroStats {
+    pub total_sessions: usize,
+    pub completed_sessions: usize,
+    pub interrupted_sessions: usize,
+    pub total_work_time: std::time::Duration,
+    pub total_break_time: std::time::Duration,
+    pub completion_rate: f64,
+}
+
+impl PomodoroStats {
+    pub fn calculate(sessions: &[PomodoroSession]) -> Self {
+        let mut stats = Self::default();
         
-        // 设置模拟数据
-        mock_storage
-            .expect_get_activities()
-            .returning(|_, _| Ok(vec![
-                Activity {
-                    id: Some(1),
-                    app_name: "test_app".into(),
-                    window_title: "test_window".into(),
-                    start_time: now,
-                    duration: Duration::from_secs(3600),
-                    category: Some("work".into()),
-                    is_productive: true,
-                    project_id: None,
-                }
-            ]));
+        stats.total_sessions = sessions.len();
         
-        mock_storage
-            .expect_get_pomodoro_sessions()
-            .returning(|_, _| Ok(vec![
-                PomodoroSession {
-                    id: Some(1),
-                    start_time: now,
-                    duration: Duration::from_secs(1500),
-                    status: PomodoroStatus::Completed,
-                    project_id: None,
-                    notes: None,
+        for session in sessions {
+            match session.status {
+                crate::core::models::PomodoroStatus::Completed => {
+                    stats.completed_sessions += 1;
+                    stats.total_work_time += session.duration;
                 }
-            ]));
-
-        let manager = AnalysisManager::new(Arc::new(mock_storage));
-        let summary = manager.get_daily_summary(now).await?;
-
-        assert_eq!(summary.total_work_time, Duration::from_secs(3600));
-        assert_eq!(summary.completed_pomodoros, 1);
-        assert!(summary.productivity_score > 0.0);
-
-        Ok(())
+                crate::core::models::PomodoroStatus::Interrupted => {
+                    stats.interrupted_sessions += 1;
+                }
+                crate::core::models::PomodoroStatus::ShortBreak | crate::core::models::PomodoroStatus::LongBreak => {
+                    stats.total_break_time += session.duration;
+                }
+                _ => {}
+            }
+        }
+        
+        if stats.total_sessions > 0 {
+            stats.completion_rate = stats.completed_sessions as f64 / stats.total_sessions as f64 * 100.0;
+        }
+        
+        stats
     }
 } 

@@ -1,7 +1,7 @@
-use crate::core::AppError;
-use crate::core::AppResult;
-use crate::plugins::traits::Plugin;
+use crate::core::{AppResult, AppError};
+use crate::plugins::Plugin;
 use libloading::{Library, Symbol};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,14 +11,7 @@ pub struct PluginLoader {
 }
 
 impl PluginLoader {
-    pub fn new() -> Self {
-        let plugin_dir = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("./data"))
-            .join("time_tracker")
-            .join("plugins");
-        
-        std::fs::create_dir_all(&plugin_dir).unwrap_or_default();
-        
+    pub fn new(plugin_dir: PathBuf) -> Self {
         Self {
             plugin_dir,
             loaded_plugins: Vec::new(),
@@ -26,29 +19,15 @@ impl PluginLoader {
     }
 
     pub fn load_plugin(&mut self, plugin_name: &str) -> AppResult<Arc<dyn Plugin>> {
-        let plugin_path = self.plugin_dir.join(format!(
-            "{}{}",
-            plugin_name,
-            std::env::consts::DLL_EXTENSION
-        ));
-
-        if !plugin_path.exists() {
-            return Err(AppError::InvalidOperation(format!(
-                "Plugin {} does not exist",
-                plugin_name
-            )));
-        }
-
+        let plugin_path = self.plugin_dir.join(format!("lib{}.so", plugin_name));
+        
         unsafe {
-            let lib = Library::new(&plugin_path).map_err(|e| AppError::Plugin(e))?;
-
-            let create_plugin: Symbol<unsafe fn() -> *mut dyn Plugin> = 
-                lib.get(b"create_plugin").map_err(|e| AppError::Plugin(e))?;
-
-            let plugin = create_plugin();
-            let plugin = Arc::new(Box::from_raw(plugin));
+            let lib = Library::new(plugin_path)?;
+            
+            let constructor: Symbol<unsafe fn() -> *mut dyn Plugin> = lib.get(b"_plugin_create")?;
+            let plugin = Arc::new(Box::from_raw(constructor()));
+            
             self.loaded_plugins.push((lib, plugin.clone()));
-
             Ok(plugin)
         }
     }
@@ -60,7 +39,9 @@ impl PluginLoader {
         Ok(())
     }
 
-    pub fn get_loaded_plugins(&self) -> Vec<Arc<dyn Plugin>> {
-        self.loaded_plugins.iter().map(|(_, p)| p.clone()).collect()
+    pub fn get_loaded_plugins(&self) -> Vec<String> {
+        self.loaded_plugins.iter()
+            .map(|(_, p)| p.name().to_string())
+            .collect()
     }
 } 

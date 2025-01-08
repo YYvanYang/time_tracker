@@ -37,27 +37,15 @@ pub enum AppError {
 
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+
+    #[error("Storage error: {0}")]
+    Storage(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;
-
-impl From<notify_rust::error::Error> for AppError {
-    fn from(err: notify_rust::error::Error) -> Self {
-        Self::Platform(err.to_string())
-    }
-}
-
-impl From<csv::Error> for AppError {
-    fn from(err: csv::Error) -> Self {
-        Self::Io(std::io::Error::new(std::io::ErrorKind::Other, err.to_string()))
-    }
-}
-
-impl From<eframe::Error> for AppError {
-    fn from(err: eframe::Error) -> Self {
-        Self::Platform(err.to_string())
-    }
-}
 
 impl From<tray_item::TIError> for AppError {
     fn from(err: tray_item::TIError) -> Self {
@@ -65,11 +53,10 @@ impl From<tray_item::TIError> for AppError {
     }
 }
 
-#[derive(Debug)]
 pub struct NotFoundError(pub String);
 
 impl From<NotFoundError> for AppError {
     fn from(err: NotFoundError) -> Self {
-        Self::Storage(err.0)
+        Self::NotFound(err.0)
     }
 } 

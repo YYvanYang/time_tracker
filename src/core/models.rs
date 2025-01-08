@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Activity {
@@ -9,6 +10,11 @@ pub struct Activity {
     pub end_time: Option<DateTime<Local>>,
     pub project_id: Option<i64>,
     pub description: Option<String>,
+    pub duration: Duration,
+    pub category: String,
+    pub is_productive: bool,
+    pub app_name: String,
+    pub window_title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -26,14 +32,28 @@ impl std::fmt::Display for Project {
     }
 }
 
+impl Project {
+    pub fn new(name: String, description: Option<String>) -> Self {
+        let now = Local::now();
+        Self {
+            id: None,
+            name,
+            description,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PomodoroSession {
     pub id: Option<i64>,
     pub start_time: DateTime<Local>,
     pub end_time: Option<DateTime<Local>>,
-    pub duration: i32,
+    pub duration: Duration,
     pub status: PomodoroStatus,
     pub project_id: Option<i64>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 use crate::infrastructure::config::Config;
 use crate::infrastructure::platform::PlatformOperations;
+use crate::infrastructure::storage::Storage;
 use crate::core::AppResult;
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ pub struct ServiceContainer {
     pub config_manager: Arc<dyn ConfigManager + Send + Sync>,
     pub window_manager: Arc<dyn WindowManager + Send + Sync>,
     pub platform: Arc<dyn PlatformOperations + Send + Sync>,
+    pub storage: Arc<dyn Storage + Send + Sync>,
 }
 
 #[async_trait::async_trait]
@@ -29,12 +31,14 @@ impl ServiceContainer {
         config_manager: Arc<dyn ConfigManager + Send + Sync>,
         window_manager: Arc<dyn WindowManager + Send + Sync>,
         platform: Arc<dyn PlatformOperations + Send + Sync>,
+        storage: Arc<dyn Storage + Send + Sync>,
     ) -> Self {
         Self {
             config,
             config_manager,
             window_manager,
             platform,
+            storage,
         }
     }
 
