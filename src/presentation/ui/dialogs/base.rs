@@ -1,34 +1,58 @@
-use crate::error::Result;
-use crate::ui::TimeTrackerApp;
-use crate::config::Config;
-use crate::storage::Storage;
-use crate::storage::app_state::AppState;
-use eframe::egui;
+use iced::{
+    widget::{Column, Container},
+    Element, Length,
+};
+use crate::presentation::ui::{Message, styles};
 
-pub struct DialogContext<'a> {
-    pub app: &'a mut TimeTrackerApp,
-    pub config: &'a Config,
-    pub state: &'a AppState,
-    pub storage: &'a Storage,
+pub struct DialogContext {
+    pub is_open: bool,
+    pub result: Option<Message>,
 }
 
-impl<'a> DialogContext<'a> {
-    pub fn show_error(&mut self, error: String) {
-        self.app.show_error(error);
-    }
-
-    pub fn pop_dialog(&mut self) {
-        self.app.pop_dialog();
+impl DialogContext {
+    pub fn new() -> Self {
+        Self {
+            is_open: false,
+            result: None,
+        }
     }
 }
 
 pub trait Dialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool;
-    fn validate(&self) -> Result<()> {
-        Ok(())
-    }
+    fn view(&self) -> Element<Message>;
+    fn update(&mut self, message: Message);
 }
 
-pub trait DialogHandler: std::any::Any + Send {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool;
+pub struct DialogContainer<'a> {
+    content: Column<'a, Message>,
+}
+
+impl<'a> DialogContainer<'a> {
+    pub fn new() -> Self {
+        Self {
+            content: Column::new(),
+        }
+    }
+
+    pub fn push<E>(mut self, element: E) -> Self
+    where
+        E: Into<Element<'a, Message>>,
+    {
+        self.content = self.content.push(element);
+        self
+    }
+
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.content = self.content.spacing(spacing);
+        self
+    }
+
+    pub fn into_element(self) -> Element<'a, Message> {
+        Container::new(self.content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(20)
+            .style(styles::container::content())
+            .into()
+    }
 } 

@@ -3,9 +3,12 @@ pub mod project;
 pub mod pomodoro;
 pub mod analysis;
 pub mod export;
+pub mod notification;
+pub mod plugin;
 
-pub use activity::ActivityService;
-pub use project::ProjectService;
-pub use pomodoro::PomodoroService;
-pub use analysis::AnalysisService;
-pub use export::ExportService; 
+// Re-export managers
+pub use activity::ActivityManager;
+pub use project::ProjectManager;
+pub use pomodoro::PomodoroManager;
+pub use analysis::AnalysisManager;
+pub use export::ExportManager; 

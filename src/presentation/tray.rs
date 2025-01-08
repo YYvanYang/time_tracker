@@ -1,31 +1,35 @@
-use tray_item::{IconSource, TrayItem};
+use std::sync::Arc;
+use tray_item::TrayItem;
 use crate::core::AppResult;
 
-pub struct SystemTray {
-    inner: TrayItem,
+pub struct TrayManager {
+    tray: Arc<TrayItem>,
 }
 
-impl SystemTray {
+impl TrayManager {
     pub fn new() -> AppResult<Self> {
-        let tray = TrayItem::new("Time Tracker", IconSource::Resource("app-icon"))?;
-        Ok(Self { inner: tray })
+        let tray = TrayItem::new("Time Tracker", "time-tracker-tray")?;
+        
+        Ok(Self {
+            tray: Arc::new(tray),
+        })
     }
 
-    pub fn set_icon(&mut self, icon_name: &str) -> AppResult<()> {
-        self.inner.set_icon(IconSource::Resource(icon_name))?;
+    pub fn show(&self) -> AppResult<()> {
         Ok(())
     }
 
-    pub fn set_tooltip(&mut self, title: &str) -> AppResult<()> {
-        self.inner.set_tooltip(title)?;
+    pub fn hide(&self) -> AppResult<()> {
         Ok(())
     }
 
-    pub fn add_menu_item<F>(&mut self, label: &str, handler: F) -> AppResult<()>
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        self.inner.add_menu_item(label, Box::new(handler))?;
+    pub fn set_icon(&self, icon_path: &str) -> AppResult<()> {
+        self.tray.set_icon(icon_path)?;
+        Ok(())
+    }
+
+    pub fn set_tooltip(&self, tooltip: &str) -> AppResult<()> {
+        self.tray.set_tooltip(tooltip)?;
         Ok(())
     }
 } 

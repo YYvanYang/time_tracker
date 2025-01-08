@@ -4,31 +4,10 @@ use chrono::{DateTime, Local};
 use std::sync::Arc;
 use serde_json;
 use csv;
+use std::time::Duration;
 
 pub struct ExportManager {
     storage: Arc<dyn Storage + Send + Sync>,
-}
-
-#[derive(serde::Serialize)]
-struct ActivityExport {
-    id: Option<i64>,
-    app_name: String,
-    window_title: String,
-    start_time: String,
-    duration_seconds: u64,
-    category: Option<String>,
-    is_productive: bool,
-    project_id: Option<i64>,
-}
-
-#[derive(serde::Serialize)]
-struct PomodoroSessionExport {
-    id: Option<i64>,
-    start_time: String,
-    duration_seconds: u64,
-    status: String,
-    project_id: Option<i64>,
-    notes: Option<String>,
 }
 
 impl ExportManager {
@@ -36,151 +15,128 @@ impl ExportManager {
         Self { storage }
     }
 
-    pub async fn export_activities_to_json(
-        &self,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<String> {
-        let activities = self.storage.get_activities(start, end).await?;
-        
-        let exports: Vec<ActivityExport> = activities.into_iter()
-            .map(|a| ActivityExport {
-                id: a.id,
-                app_name: a.app_name,
-                window_title: a.window_title,
-                start_time: a.start_time.to_rfc3339(),
-                duration_seconds: a.duration.as_secs(),
-                category: a.category,
-                is_productive: a.is_productive,
-                project_id: a.project_id,
-            })
-            .collect();
-
-        Ok(serde_json::to_string_pretty(&exports)?)
+    fn format_duration(duration: std::time::Duration) -> String {
+        let total_seconds = duration.as_secs();
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+        let seconds = total_seconds % 60;
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
     }
 
-    pub async fn export_activities_to_csv(
-        &self,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<String> {
-        let activities = self.storage.get_activities(start, end).await?;
-        let mut wtr = csv::Writer::from_writer(vec![]);
+    async fn export_activities_to_csv(&self, activities: &[Activity]) -> AppResult<Vec<u8>> {
+        let mut wtr = csv::Writer::from_writer(Vec::new());
+        
+        wtr.write_record(&[
+            "ID",
+            "Name",
+            "Start Time",
+            "End Time",
+            "Duration",
+            "Project",
+            "Category",
+            "Is Productive",
+            "App Name",
+            "Window Title",
+            "Description",
+        ])?;
 
         for activity in activities {
-            wtr.serialize(ActivityExport {
-                id: activity.id,
-                app_name: activity.app_name,
-                window_title: activity.window_title,
-                start_time: activity.start_time.to_rfc3339(),
-                duration_seconds: activity.duration.as_secs(),
-                category: activity.category,
-                is_productive: activity.is_productive,
-                project_id: activity.project_id,
-            })?;
+            let project_name = if let Some(project_id) = activity.project_id {
+                self.storage.get_project(project_id).await
+                    .map(|p| p.name)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            wtr.write_record(&[
+                activity.id.map(|id| id.to_string()).unwrap_or_default(),
+                activity.name.clone(),
+                activity.start_time.to_rfc3339(),
+                activity.end_time.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                Self::format_duration(activity.duration),
+                project_name,
+                activity.category.clone(),
+                if activity.is_productive { "Yes" } else { "No" }.to_string(),
+                activity.app_name.clone(),
+                activity.window_title.clone(),
+                activity.description.clone().unwrap_or_default(),
+            ])?;
         }
 
-        let data = wtr.into_inner().map_err(|e| crate::core::AppError::CsvWriter(e))?;
-        String::from_utf8(data).map_err(|e| e.into())
+        Ok(wtr.into_inner()?)
     }
 
-    pub async fn export_pomodoros_to_json(
-        &self,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<String> {
-        let sessions = self.storage.get_pomodoro_sessions(start, end).await?;
+    async fn export_pomodoros_to_csv(&self, sessions: &[PomodoroSession]) -> AppResult<Vec<u8>> {
+        let mut wtr = csv::Writer::from_writer(Vec::new());
         
-        let exports: Vec<PomodoroSessionExport> = sessions.into_iter()
-            .map(|s| PomodoroSessionExport {
-                id: s.id,
-                start_time: s.start_time.to_rfc3339(),
-                duration_seconds: s.duration.as_secs(),
-                status: format!("{:?}", s.status),
-                project_id: s.project_id,
-                notes: s.notes,
-            })
-            .collect();
-
-        Ok(serde_json::to_string_pretty(&exports)?)
-    }
-
-    pub async fn export_pomodoros_to_csv(
-        &self,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<String> {
-        let sessions = self.storage.get_pomodoro_sessions(start, end).await?;
-        let mut wtr = csv::Writer::from_writer(vec![]);
+        wtr.write_record(&[
+            "ID",
+            "Start Time",
+            "End Time",
+            "Duration",
+            "Status",
+            "Project",
+            "Notes",
+        ])?;
 
         for session in sessions {
-            wtr.serialize(PomodoroSessionExport {
-                id: session.id,
-                start_time: session.start_time.to_rfc3339(),
-                duration_seconds: session.duration.as_secs(),
-                status: format!("{:?}", session.status),
-                project_id: session.project_id,
-                notes: session.notes,
-            })?;
+            let project_name = if let Some(project_id) = session.project_id {
+                self.storage.get_project(project_id).await
+                    .map(|p| p.name)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            wtr.write_record(&[
+                session.id.map(|id| id.to_string()).unwrap_or_default(),
+                session.start_time.to_rfc3339(),
+                session.end_time.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                Self::format_duration(session.duration),
+                format!("{:?}", session.status),
+                project_name,
+                session.notes.clone().unwrap_or_default(),
+            ])?;
         }
 
-        let data = wtr.into_inner().map_err(|e| crate::core::AppError::CsvWriter(e))?;
-        String::from_utf8(data).map_err(|e| e.into())
+        Ok(wtr.into_inner()?)
     }
 
-    pub async fn export_project_data_to_json(
-        &self,
-        project_id: i64,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<String> {
-        let activities = self.storage.get_project_activities(project_id, start, end).await?;
-        let sessions = self.storage.get_project_pomodoro_sessions(project_id, start, end).await?;
-
-        let export = ProjectExport {
-            activities: activities.into_iter()
-                .map(|a| ActivityExport {
-                    id: a.id,
-                    app_name: a.app_name,
-                    window_title: a.window_title,
-                    start_time: a.start_time.to_rfc3339(),
-                    duration_seconds: a.duration.as_secs(),
-                    category: a.category,
-                    is_productive: a.is_productive,
-                    project_id: a.project_id,
-                })
-                .collect(),
-            pomodoros: sessions.into_iter()
-                .map(|s| PomodoroSessionExport {
-                    id: s.id,
-                    start_time: s.start_time.to_rfc3339(),
-                    duration_seconds: s.duration.as_secs(),
-                    status: format!("{:?}", s.status),
-                    project_id: s.project_id,
-                    notes: s.notes,
-                })
-                .collect(),
-        };
-
-        Ok(serde_json::to_string_pretty(&export)?)
+    async fn export_to_json<T: serde::Serialize>(&self, data: &T) -> AppResult<Vec<u8>> {
+        Ok(serde_json::to_vec_pretty(data)?)
     }
 }
 
-#[derive(serde::Serialize)]
-struct ProjectExport {
-    activities: Vec<ActivityExport>,
-    pomodoros: Vec<PomodoroSessionExport>,
+#[async_trait::async_trait]
+impl ExportService for ExportManager {
+    async fn export_activities(&self, start: DateTime<Local>, end: DateTime<Local>, format: ExportFormat) -> AppResult<Vec<u8>> {
+        let activities = self.storage.get_activities(start, end).await?;
+        
+        match format {
+            ExportFormat::CSV => self.export_activities_to_csv(&activities).await,
+            ExportFormat::JSON => self.export_to_json(&activities).await,
+            ExportFormat::Excel => Err(crate::core::error::AppError::NotImplemented("Excel export not implemented yet".into())),
+        }
+    }
+
+    async fn export_pomodoros(&self, start: DateTime<Local>, end: DateTime<Local>, format: ExportFormat) -> AppResult<Vec<u8>> {
+        let sessions = self.storage.get_pomodoro_sessions(start, end).await?;
+        
+        match format {
+            ExportFormat::CSV => self.export_pomodoros_to_csv(&sessions).await,
+            ExportFormat::JSON => self.export_to_json(&sessions).await,
+            ExportFormat::Excel => Err(crate::core::error::AppError::NotImplemented("Excel export not implemented yet".into())),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::models::*;
-    use std::time::Duration;
 
     #[tokio::test]
-    async fn test_export_activities() -> AppResult<()> {
-        // TODO: 实现测试
-        Ok(())
+    async fn test_export_manager() {
+        // TODO: 添加测试用例
     }
 } 

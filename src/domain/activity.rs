@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use chrono::{DateTime, Local};
 use crate::core::{AppResult, models::*};
 use crate::core::traits::*;
 
@@ -60,6 +61,17 @@ impl TimeTracker for ActivityManager {
 
     async fn is_tracking(&self) -> AppResult<bool> {
         Ok(self.current_activity.read().await.is_some())
+    }
+}
+
+#[async_trait::async_trait]
+impl ActivityService for ActivityManager {
+    async fn get_activities(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>> {
+        self.storage.get_activities(start, end).await
+    }
+
+    async fn get_project_activities(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>> {
+        self.storage.get_project_activities(project_id, start, end).await
     }
 }
 

@@ -43,4 +43,38 @@ pub trait PomodoroTimer {
     async fn stop_session(&self) -> AppResult<()>;
     async fn get_current_session(&self) -> AppResult<Option<PomodoroSession>>;
     async fn is_active(&self) -> AppResult<bool>;
+}
+
+#[async_trait]
+pub trait ActivityService: TimeTracker {
+    async fn get_activities(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>>;
+    async fn get_project_activities(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>>;
+}
+
+#[async_trait]
+pub trait ProjectService: Send + Sync {
+    async fn create_project(&self, project: Project) -> AppResult<i64>;
+    async fn update_project(&self, project: Project) -> AppResult<()>;
+    async fn delete_project(&self, id: i64) -> AppResult<()>;
+    async fn get_project(&self, id: i64) -> AppResult<Project>;
+    async fn list_projects(&self) -> AppResult<Vec<Project>>;
+}
+
+#[async_trait]
+pub trait PomodoroService: PomodoroTimer {
+    async fn get_sessions(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>>;
+    async fn get_project_sessions(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>>;
+}
+
+#[async_trait]
+pub trait AnalysisService: Send + Sync {
+    async fn get_daily_summary(&self, date: DateTime<Local>) -> AppResult<DailySummary>;
+    async fn get_weekly_summary(&self, start: DateTime<Local>) -> AppResult<WeeklySummary>;
+    async fn get_monthly_summary(&self, start: DateTime<Local>) -> AppResult<MonthlySummary>;
+}
+
+#[async_trait]
+pub trait ExportService: Send + Sync {
+    async fn export_activities(&self, start: DateTime<Local>, end: DateTime<Local>, format: ExportFormat) -> AppResult<Vec<u8>>;
+    async fn export_pomodoros(&self, start: DateTime<Local>, end: DateTime<Local>, format: ExportFormat) -> AppResult<Vec<u8>>;
 } 

@@ -1,15 +1,11 @@
-use crate::infrastructure::config::Config;
-use crate::infrastructure::platform::PlatformOperations;
-use crate::infrastructure::storage::Storage;
-use crate::core::AppResult;
 use std::sync::Arc;
+use crate::core::{AppResult, error::AppError, traits::Storage, models::*};
+use crate::infrastructure::config::Config;
+use chrono::{DateTime, Local};
 
-pub struct ServiceContainer {
-    pub config: Config,
-    pub config_manager: Arc<dyn ConfigManager + Send + Sync>,
-    pub window_manager: Arc<dyn WindowManager + Send + Sync>,
-    pub platform: Arc<dyn PlatformOperations + Send + Sync>,
+pub struct Services {
     pub storage: Arc<dyn Storage + Send + Sync>,
+    pub config: Config,
 }
 
 #[async_trait::async_trait]
@@ -25,20 +21,14 @@ pub trait WindowManager: Send + Sync {
     async fn is_visible(&self) -> AppResult<bool>;
 }
 
-impl ServiceContainer {
+impl Services {
     pub fn new(
-        config: Config,
-        config_manager: Arc<dyn ConfigManager + Send + Sync>,
-        window_manager: Arc<dyn WindowManager + Send + Sync>,
-        platform: Arc<dyn PlatformOperations + Send + Sync>,
         storage: Arc<dyn Storage + Send + Sync>,
+        config: Config,
     ) -> Self {
         Self {
-            config,
-            config_manager,
-            window_manager,
-            platform,
             storage,
+            config,
         }
     }
 

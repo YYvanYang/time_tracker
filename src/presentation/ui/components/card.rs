@@ -1,97 +1,39 @@
-use eframe::egui;
-use crate::ui::styles;
+use iced::{
+    widget::{container, Column},
+    Element, Length, Theme,
+};
+use crate::presentation::ui::styles;
+use crate::presentation::ui::Message;
 
-pub struct Card {
-    style: styles::CardStyle,
-    collapsible: bool,
-    title: Option<String>,
+pub struct Card<'a> {
+    content: Column<'a, Message>,
 }
 
-impl Card {
+impl<'a> Card<'a> {
     pub fn new() -> Self {
         Self {
-            style: styles::CardStyle::default(),
-            collapsible: false,
-            title: None,
+            content: Column::new(),
         }
     }
 
-    pub fn with_style(mut self, style: styles::CardStyle) -> Self {
-        self.style = style;
+    pub fn push<E>(mut self, element: E) -> Self
+    where
+        E: Into<Element<'a, Message>>,
+    {
+        self.content = self.content.push(element);
         self
     }
 
-    pub fn collapsible(mut self, title: impl Into<String>) -> Self {
-        self.collapsible = true;
-        self.title = Some(title.into());
+    pub fn spacing(mut self, spacing: f32) -> Self {
+        self.content = self.content.spacing(spacing);
         self
     }
 
-    pub fn show<R>(
-        &self,
-        ui: &mut egui::Ui,
-        add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> egui::Response {
-        if self.collapsible {
-            if let Some(title) = &self.title {
-                egui::CollapsingHeader::new(title)
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        self.draw_card_contents(ui, &self.style, add_contents);
-                    })
-                    .header_response
-            } else {
-                self.draw_frame(ui, &self.style, add_contents)
-            }
-        } else {
-            self.draw_frame(ui, &self.style, add_contents)
-        }
-    }
-
-    fn draw_frame<R>(
-        &self,
-        ui: &mut egui::Ui,
-        style: &styles::CardStyle,
-        add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) -> egui::Response {
-        egui::Frame::none()
-            .inner_margin(style.padding)
-            .rounding(style.rounding)
-            .fill(style.background)
-            .stroke(style.border)
-            .show(ui, |ui| {
-                self.draw_card_contents(ui, style, add_contents);
-            })
-            .response
-    }
-
-    fn draw_card_contents<R>(
-        &self,
-        ui: &mut egui::Ui,
-        style: &styles::CardStyle,
-        add_contents: impl FnOnce(&mut egui::Ui) -> R,
-    ) {
-        ui.spacing_mut().item_spacing = style.spacing;
-        add_contents(ui);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use eframe::egui::{Context, RawInput};
-
-    #[test]
-    fn test_card() {
-        let ctx = Context::default();
-        ctx.run(RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let card = Card::new()
-                    .collapsible("Test Card");
-                card.show(ui, |ui| {
-                    ui.label("Test content");
-                });
-            });
-        });
+    pub fn into_element(self) -> Element<'a, Message> {
+        container(self.content)
+            .width(Length::Fill)
+            .padding(20)
+            .style(styles::container::content())
+            .into()
     }
 } 
