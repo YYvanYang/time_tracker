@@ -6,176 +6,95 @@ use tokio::sync::RwLock;
 use std::time::Duration;
 
 pub struct PomodoroManager {
-    storage: Arc<dyn Storage>,
-    current_session: RwLock<Option<PomodoroSession>>,
-    start_time: RwLock<Option<DateTime<Local>>>,
-    settings: RwLock<PomodoroSettings>,
+    storage: Arc<dyn Storage + Send + Sync>,
+    current_session: Arc<RwLock<Option<PomodoroSession>>>,
 }
 
 impl PomodoroManager {
-    pub fn new(storage: Arc<dyn Storage>, settings: PomodoroSettings) -> Self {
+    pub fn new(storage: Arc<dyn Storage + Send + Sync>) -> Self {
         Self {
             storage,
-            current_session: RwLock::new(None),
-            start_time: RwLock::new(None),
-            settings: RwLock::new(settings),
+            current_session: Arc::new(RwLock::new(None)),
         }
     }
 
-    pub async fn start_session(&self, project_id: Option<i64>) -> AppResult<()> {
-        let now = Local::now();
-        
-        // 如果有正在进行的会话,先保存它
-        if let Some(mut session) = self.current_session.write().await.take() {
-            if let Some(start) = *self.start_time.read().await {
-                session.duration = now.signed_duration_since(start).to_std()?;
-                self.storage.save_pomodoro_session(&session).await?;
-            }
-        }
-
-        // 创建新会话
+    async fn start_session(&self, duration: i32) -> AppResult<()> {
         let session = PomodoroSession {
             id: None,
-            start_time: now,
-            duration: Duration::from_secs(0),
-            status: PomodoroStatus::Working,
-            project_id,
-            notes: None,
+            start_time: chrono::Local::now(),
+            end_time: None,
+            duration,
+            status: PomodoroStatus::Work,
+            project_id: None,
         };
-
-        *self.current_session.write().await = Some(session);
-        *self.start_time.write().await = Some(now);
-
+        let mut current = self.current_session.write().await;
+        *current = Some(session);
         Ok(())
     }
 
-    pub async fn stop_session(&self) -> AppResult<()> {
-        let now = Local::now();
-        
-        if let Some(mut session) = self.current_session.write().await.take() {
-            if let Some(start) = self.start_time.write().await.take() {
-                session.duration = now.signed_duration_since(start).to_std()?;
-                session.status = PomodoroStatus::Completed;
-                self.storage.save_pomodoro_session(&session).await?;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn pause_session(&self) -> AppResult<()> {
-        if let Some(mut session) = self.current_session.write().await.as_mut() {
-            session.status = PomodoroStatus::Paused;
-            if let Some(start) = *self.start_time.read().await {
-                session.duration = Local::now().signed_duration_since(start).to_std()?;
-            }
+    async fn stop_session(&self) -> AppResult<()> {
+        let mut current = self.current_session.write().await;
+        if let Some(mut session) = current.take() {
+            session.end_time = Some(chrono::Local::now());
+            session.status = PomodoroStatus::Completed;
+            self.storage.save_pomodoro(&session).await?;
         }
         Ok(())
     }
 
-    pub async fn resume_session(&self) -> AppResult<()> {
-        if let Some(mut session) = self.current_session.write().await.as_mut() {
-            session.status = PomodoroStatus::Working;
-            *self.start_time.write().await = Some(Local::now());
+    async fn pause_session(&self) -> AppResult<()> {
+        let mut current = self.current_session.write().await;
+        if let Some(session) = current.as_mut() {
+            session.status = PomodoroStatus::ShortBreak;
         }
         Ok(())
     }
 
-    pub async fn get_current_session(&self) -> Option<PomodoroSession> {
+    async fn resume_session(&self) -> AppResult<()> {
+        let mut current = self.current_session.write().await;
+        if let Some(session) = current.as_mut() {
+            session.status = PomodoroStatus::Work;
+        }
+        Ok(())
+    }
+
+    async fn get_current_session(&self) -> Option<PomodoroSession> {
         self.current_session.read().await.clone()
     }
 
-    pub async fn get_elapsed_time(&self) -> Duration {
-        if let Some(start) = *self.start_time.read().await {
-            Local::now()
-                .signed_duration_since(start)
-                .to_std()
-                .unwrap_or(Duration::from_secs(0))
+    async fn is_active(&self) -> bool {
+        if let Some(session) = self.current_session.read().await.as_ref() {
+            matches!(session.status, PomodoroStatus::Work)
         } else {
-            Duration::from_secs(0)
+            false
         }
-    }
-
-    pub async fn update_settings(&self, settings: PomodoroSettings) -> AppResult<()> {
-        *self.settings.write().await = settings;
-        Ok(())
-    }
-
-    pub async fn get_settings(&self) -> PomodoroSettings {
-        self.settings.read().await.clone()
-    }
-
-    pub async fn add_session_note(&self, note: String) -> AppResult<()> {
-        if let Some(mut session) = self.current_session.write().await.as_mut() {
-            session.notes = Some(note);
-        }
-        Ok(())
-    }
-
-    pub async fn get_sessions_by_date_range(
-        &self,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<Vec<PomodoroSession>> {
-        self.storage.get_pomodoro_sessions(start, end).await
-    }
-
-    pub async fn get_daily_sessions(&self) -> AppResult<Vec<PomodoroSession>> {
-        self.storage.get_daily_pomodoro_sessions().await
-    }
-
-    pub async fn get_weekly_sessions(&self) -> AppResult<Vec<PomodoroSession>> {
-        self.storage.get_weekly_pomodoro_sessions().await
-    }
-
-    pub async fn get_project_sessions(
-        &self,
-        project_id: i64,
-        start: DateTime<Local>,
-        end: DateTime<Local>,
-    ) -> AppResult<Vec<PomodoroSession>> {
-        self.storage.get_project_pomodoro_sessions(project_id, start, end).await
     }
 }
 
 #[async_trait::async_trait]
 impl PomodoroTimer for PomodoroManager {
-    async fn start(&self) -> AppResult<()> {
-        self.start_session(None).await
+    async fn start_session(&self, duration: i32) -> AppResult<()> {
+        self.start_session(duration).await
     }
 
-    async fn stop(&self) -> AppResult<()> {
-        self.stop_session().await
-    }
-
-    async fn pause(&self) -> AppResult<()> {
+    async fn pause_session(&self) -> AppResult<()> {
         self.pause_session().await
     }
 
-    async fn resume(&self) -> AppResult<()> {
+    async fn resume_session(&self) -> AppResult<()> {
         self.resume_session().await
     }
 
-    async fn is_active(&self) -> bool {
-        if let Some(session) = self.current_session.read().await.as_ref() {
-            matches!(session.status, PomodoroStatus::Working)
-        } else {
-            false
-        }
-    }
-
-    async fn get_remaining_time(&self) -> Duration {
-        let settings = self.settings.read().await;
-        let elapsed = self.get_elapsed_time().await;
-        if elapsed >= settings.work_duration {
-            Duration::from_secs(0)
-        } else {
-            settings.work_duration - elapsed
-        }
+    async fn stop_session(&self) -> AppResult<()> {
+        self.stop_session().await
     }
 
     async fn get_current_session(&self) -> AppResult<Option<PomodoroSession>> {
         Ok(self.get_current_session().await)
+    }
+
+    async fn is_active(&self) -> AppResult<bool> {
+        Ok(self.is_active().await)
     }
 }
 

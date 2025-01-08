@@ -33,6 +33,10 @@ pub enum AppEvent {
     BackupCompleted,
     DatabaseVacuumStarted,
     DatabaseVacuumCompleted,
+    
+    // 窗口事件
+    WindowShown,
+    WindowHidden,
 }
 
 #[derive(Clone)]
@@ -57,6 +61,6 @@ impl EventBus {
 
 impl Default for EventBus {
     fn default() -> Self {
-        Self::new(100)
+        Self::new(32)
     }
 } 

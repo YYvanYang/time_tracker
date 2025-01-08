@@ -22,6 +22,7 @@ use views::*;
 use chrono::Duration;
 use crate::storage::{Project, Tag};
 use crate::ui::dialogs::DialogHandler;
+use crate::core::AppResult;
 
 pub struct AppUsageData {
     pub name: String,
@@ -34,7 +35,7 @@ pub struct DialogResult {
     pub data: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Overview,
     AppUsage,
@@ -75,6 +76,12 @@ pub struct TimeTrackerApp {
     pub tasks: Vec<Task>,
     pub projects: Vec<Project>,
     show_add_project_dialog: bool,
+    current_view: View,
+    current_dialog: Option<Box<dyn Dialog>>,
+}
+
+pub trait Dialog: Send + Sync {
+    fn show(&self, ctx: &egui::Context, app: &mut TimeTrackerApp);
 }
 
 impl TimeTrackerApp {
@@ -104,6 +111,8 @@ impl TimeTrackerApp {
             tasks: Vec::new(),
             projects: Vec::new(),
             show_add_project_dialog: false,
+            current_view: View::Overview,
+            current_dialog: None,
         }
     }
 
@@ -139,6 +148,77 @@ impl TimeTrackerApp {
         let mut storage = self.storage.lock().unwrap();
         storage.update_config(config.storage)?;
         Ok(())
+    }
+
+    pub fn set_view(&mut self, view: View) {
+        self.current_view = view;
+    }
+
+    pub fn current_view(&self) -> View {
+        self.current_view
+    }
+
+    pub fn current_dialog(&self) -> Option<&dyn Dialog> {
+        self.current_dialog.as_deref()
+    }
+
+    pub fn render_overview(&self, ui: &mut egui::Ui) {
+        // Implementation for render_overview
+    }
+
+    pub fn render_app_usage(&self, ui: &mut egui::Ui) {
+        // Implementation for render_app_usage
+    }
+
+    pub fn render_pomodoro(&self, ui: &mut egui::Ui) {
+        // Implementation for render_pomodoro
+    }
+
+    pub fn render_projects(&self, ui: &mut egui::Ui) {
+        // Implementation for render_projects
+    }
+
+    pub fn render_statistics(&self, ui: &mut egui::Ui) {
+        // Implementation for render_statistics
+    }
+
+    pub fn render_settings(&self, ui: &mut egui::Ui) {
+        // Implementation for render_settings
+    }
+
+    pub fn start_pomodoro(&self) {
+        // Implementation for start_pomodoro
+    }
+
+    pub fn pause_pomodoro(&self) {
+        // Implementation for pause_pomodoro
+    }
+
+    pub fn stop_pomodoro(&self) {
+        // Implementation for stop_pomodoro
+    }
+
+    pub fn quit(&self) {
+        // Implementation for quit
+    }
+}
+
+impl eframe::App for TimeTrackerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            match self.current_view {
+                View::Overview => self.render_overview(ui),
+                View::AppUsage => self.render_app_usage(ui),
+                View::Pomodoro => self.render_pomodoro(ui),
+                View::Projects => self.render_projects(ui),
+                View::Statistics => self.render_statistics(ui),
+                View::Settings => self.render_settings(ui),
+            }
+        });
+
+        if let Some(dialog) = &self.current_dialog {
+            dialog.show(ctx, self);
+        }
     }
 }
 

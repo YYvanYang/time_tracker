@@ -2,7 +2,7 @@ use crate::application::App;
 use crate::core::models::{PomodoroSession, Project};
 use crate::presentation::state::SharedState;
 use iced::{
-    widget::{Button, Column, Container, Row, Text, TextInput, PickList},
+    widget::{Button, Column, Container, Row, Text, TextInput, PickList, Space},
     Element, Length, Command, Subscription,
 };
 use std::sync::Arc;
@@ -127,60 +127,28 @@ impl PomodoroView {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let input_row = Row::new()
-            .push(
-                TextInput::new("时长(分钟)", &self.duration_input)
-                    .on_input(Message::DurationChanged)
-                    .padding(10),
-            )
-            .push(
-                TextInput::new("标签(逗号分隔)", &self.tags_input)
-                    .on_input(Message::TagsChanged)
-                    .padding(10),
-            )
+        let mut column = Column::new().spacing(10);
+
+        // 项目选择
+        let project_picker = Row::new()
+            .push(Text::new("项目:"))
+            .push(Space::with_width(Length::Fixed(10)))
             .push(
                 PickList::new(
                     &self.available_projects,
                     self.selected_project.clone(),
                     Message::ProjectSelected,
                 )
-                .padding(10),
+                .placeholder("选择项目...")
+                .width(Length::Fixed(200))
             )
             .spacing(10);
 
-        let control_row = Row::new()
-            .push(
-                Button::new(Text::new("开始"))
-                    .on_press(Message::StartPomodoro)
-                    .padding(10),
-            )
-            .push(
-                Button::new(Text::new("暂停"))
-                    .on_press(Message::PausePomodoro)
-                    .padding(10),
-            )
-            .push(
-                Button::new(Text::new("继续"))
-                    .on_press(Message::ResumePomodoro)
-                    .padding(10),
-            )
-            .push(
-                Button::new(Text::new("停止"))
-                    .on_press(Message::StopPomodoro)
-                    .padding(10),
-            )
-            .spacing(10);
+        column = column
+            .push(project_picker)
+            .push(Space::with_height(Length::Fixed(20)));
 
-        let timer_display = self.timer_display();
-
-        let content = Column::new()
-            .push(input_row)
-            .push(control_row)
-            .push(timer_display)
-            .spacing(20)
-            .padding(20);
-
-        Container::new(content)
+        Container::new(column)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()

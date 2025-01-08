@@ -27,6 +27,19 @@ pub enum TimeRange {
     Week,
     Month,
     Year,
+    Custom,
+}
+
+impl std::fmt::Display for TimeRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeRange::Today => write!(f, "今天"),
+            TimeRange::Week => write!(f, "本周"),
+            TimeRange::Month => write!(f, "本月"),
+            TimeRange::Year => write!(f, "今年"),
+            TimeRange::Custom => write!(f, "自定义"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

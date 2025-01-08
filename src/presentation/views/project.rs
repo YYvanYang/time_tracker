@@ -16,6 +16,7 @@ pub enum Message {
     DeleteProject(Project),
     SelectProject(Project),
     ProjectsLoaded(Vec<Project>),
+    EditProject(Project),
 }
 
 pub struct ProjectView {
@@ -23,6 +24,7 @@ pub struct ProjectView {
     state: SharedState,
     name_input: String,
     description_input: String,
+    projects: Vec<Project>,
 }
 
 impl ProjectView {
@@ -32,6 +34,7 @@ impl ProjectView {
             state,
             name_input: String::new(),
             description_input: String::new(),
+            projects: Vec::new(),
         }
     }
 
@@ -102,6 +105,9 @@ impl ProjectView {
                     |_| Message::ProjectsLoaded(vec![]),
                 )
             }
+            Message::EditProject(project) => {
+                Command::none()
+            }
         }
     }
 
@@ -151,10 +157,11 @@ impl ProjectView {
     fn project_list(&self) -> Element<Message> {
         let mut column = Column::new().spacing(10);
 
-        // TODO: 从状态中获取项目列表并显示
-        // for project in &self.state.projects {
-        //     column = column.push(self.project_item(project));
-        // }
+        for project in &self.projects {
+            column = column.push(self.project_item(project));
+        }
+
+        column = column.push(Space::with_height(Length::Fixed(10)));
 
         column.into()
     }
@@ -170,7 +177,7 @@ impl ProjectView {
             )
             .push(
                 Button::new(Text::new("编辑"))
-                    .on_press(Message::UpdateProject(project.clone()))
+                    .on_press(Message::EditProject(project.clone()))
                     .padding(5),
             )
             .push(
