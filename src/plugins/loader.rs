@@ -1,47 +1,46 @@
-use crate::core::{AppResult, AppError};
-use crate::plugins::Plugin;
-use libloading::{Library, Symbol};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
+use libloading::{Library, Symbol};
+use crate::core::AppResult;
+use crate::plugins::traits::Plugin;
 
 pub struct PluginLoader {
-    plugin_dir: PathBuf,
-    loaded_plugins: Vec<(Library, Arc<dyn Plugin>)>,
+    libraries: HashMap<String, Library>,
 }
 
 impl PluginLoader {
-    pub fn new(plugin_dir: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
-            plugin_dir,
-            loaded_plugins: Vec::new(),
+            libraries: HashMap::new(),
         }
     }
 
     pub fn load_plugin(&mut self, plugin_name: &str) -> AppResult<Arc<dyn Plugin>> {
-        let plugin_path = self.plugin_dir.join(format!("lib{}.so", plugin_name));
-        
-        unsafe {
-            let lib = Library::new(plugin_path)?;
-            
-            let constructor: Symbol<unsafe fn() -> *mut dyn Plugin> = lib.get(b"_plugin_create")?;
-            let plugin = Arc::new(Box::from_raw(constructor()));
-            
-            self.loaded_plugins.push((lib, plugin.clone()));
-            Ok(plugin)
-        }
+        let lib_path = format!("plugins/{}.so", plugin_name);
+        let lib = unsafe { Library::new(&lib_path)? };
+
+        let constructor: Symbol<unsafe fn() -> *mut dyn Plugin> = unsafe {
+            lib.get(b"_plugin_create")?
+        };
+
+        let plugin = unsafe {
+            let raw = constructor();
+            Arc::from_raw(raw as *mut dyn Plugin)
+        };
+
+        self.libraries.insert(plugin_name.to_string(), lib);
+        Ok(plugin)
     }
 
     pub fn unload_plugin(&mut self, plugin_name: &str) -> AppResult<()> {
-        if let Some(index) = self.loaded_plugins.iter().position(|(_, p)| p.name() == plugin_name) {
-            self.loaded_plugins.remove(index);
+        if let Some(lib) = self.libraries.remove(plugin_name) {
+            drop(lib);
         }
         Ok(())
     }
 
-    pub fn get_loaded_plugins(&self) -> Vec<String> {
-        self.loaded_plugins.iter()
-            .map(|(_, p)| p.name().to_string())
-            .collect()
+    pub fn list_plugins(&self) -> AppResult<Vec<String>> {
+        // TODO: 实现插件扫描逻辑
+        Ok(Vec::new())
     }
 } 

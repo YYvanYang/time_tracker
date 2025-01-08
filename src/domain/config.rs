@@ -4,6 +4,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait ConfigManager: Send + Sync {
+    async fn save_config(&self, config: &AppConfig) -> AppResult<()>;
+    async fn load_config(&self) -> AppResult<AppConfig>;
+    async fn get_config(&self) -> AppResult<AppConfig>;
+    async fn update_config(&self, config: AppConfig) -> AppResult<()>;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -12,6 +21,14 @@ pub struct AppConfig {
     pub ui: UISettings,
     pub storage: StorageSettings,
     pub rules: RuleSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PomodoroSettings {
+    pub work_duration: Duration,
+    pub short_break_duration: Duration,
+    pub long_break_duration: Duration,
+    pub long_break_interval: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,9 +60,44 @@ pub struct StorageSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleSettings {
     pub auto_categorize: bool,
-    pub productivity_threshold: f32,
+    pub productivity_threshold: f64,
     pub min_activity_duration: Duration,
     pub suggestion_threshold: u32,
+}
+
+pub struct ConfigManagerImpl {
+    storage: Arc<dyn Storage>,
+    config: RwLock<AppConfig>,
+}
+
+impl ConfigManagerImpl {
+    pub fn new(storage: Arc<dyn Storage>) -> Self {
+        Self {
+            storage,
+            config: RwLock::new(AppConfig::default()),
+        }
+    }
+}
+
+#[async_trait]
+impl ConfigManager for ConfigManagerImpl {
+    async fn save_config(&self, config: &AppConfig) -> AppResult<()> {
+        *self.config.write().await = config.clone();
+        Ok(())
+    }
+
+    async fn load_config(&self) -> AppResult<AppConfig> {
+        Ok(self.config.read().await.clone())
+    }
+
+    async fn get_config(&self) -> AppResult<AppConfig> {
+        Ok(self.config.read().await.clone())
+    }
+
+    async fn update_config(&self, config: AppConfig) -> AppResult<()> {
+        *self.config.write().await = config;
+        Ok(())
+    }
 }
 
 impl Default for AppConfig {
@@ -87,94 +139,15 @@ impl Default for AppConfig {
     }
 }
 
-pub struct ConfigManager {
-    storage: Arc<dyn Storage>,
-    config: RwLock<AppConfig>,
-}
-
-impl ConfigManager {
-    pub fn new(storage: Arc<dyn Storage>) -> Self {
-        Self {
-            storage,
-            config: RwLock::new(AppConfig::default()),
-        }
-    }
-
-    pub async fn load_config(&self) -> AppResult<()> {
-        if let Some(config) = self.storage.get_config().await? {
-            *self.config.write().await = config;
-        }
-        Ok(())
-    }
-
-    pub async fn save_config(&self) -> AppResult<()> {
-        let config = self.config.read().await;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn get_config(&self) -> AppConfig {
-        self.config.read().await.clone()
-    }
-
-    pub async fn update_config(&self, config: AppConfig) -> AppResult<()> {
-        *self.config.write().await = config;
-        self.save_config().await
-    }
-
-    pub async fn update_pomodoro_settings(&self, settings: PomodoroSettings) -> AppResult<()> {
-        let mut config = self.config.write().await;
-        config.pomodoro = settings;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn update_notification_settings(&self, settings: NotificationSettings) -> AppResult<()> {
-        let mut config = self.config.write().await;
-        config.notification = settings;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn update_ui_settings(&self, settings: UISettings) -> AppResult<()> {
-        let mut config = self.config.write().await;
-        config.ui = settings;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn update_storage_settings(&self, settings: StorageSettings) -> AppResult<()> {
-        let mut config = self.config.write().await;
-        config.storage = settings;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn update_rule_settings(&self, settings: RuleSettings) -> AppResult<()> {
-        let mut config = self.config.write().await;
-        config.rules = settings;
-        self.storage.save_config(&config).await
-    }
-
-    pub async fn export_config(&self) -> AppResult<String> {
-        let config = self.config.read().await;
-        Ok(serde_json::to_string_pretty(&*config)?)
-    }
-
-    pub async fn import_config(&self, json: &str) -> AppResult<()> {
-        let config: AppConfig = serde_json::from_str(json)?;
-        self.update_config(config).await
-    }
-
-    pub async fn reset_to_default(&self) -> AppResult<()> {
-        self.update_config(AppConfig::default()).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockall::mock;
     use mockall::predicate::*;
+    use mockall::mock;
 
     mock! {
         Storage {}
-        #[async_trait::async_trait]
+        #[async_trait]
         impl Storage for Storage {
             async fn get_config(&self) -> AppResult<Option<AppConfig>>;
             async fn save_config(&self, config: &AppConfig) -> AppResult<()>;
@@ -185,7 +158,6 @@ mod tests {
     async fn test_config_lifecycle() -> AppResult<()> {
         let mut mock_storage = MockStorage::new();
         
-        // 设置模拟数据
         mock_storage
             .expect_get_config()
             .returning(|| Ok(Some(AppConfig::default())));
@@ -194,19 +166,18 @@ mod tests {
             .expect_save_config()
             .returning(|_| Ok(()));
 
-        let manager = ConfigManager::new(Arc::new(mock_storage));
+        let manager = ConfigManagerImpl::new(Arc::new(mock_storage));
 
         // 测试加载配置
-        manager.load_config().await?;
-        let config = manager.get_config().await;
+        let config = manager.get_config().await?;
         assert_eq!(config.ui.language, "zh-CN");
 
         // 测试更新配置
         let mut new_config = config.clone();
         new_config.ui.language = "en-US".into();
-        manager.update_config(new_config).await?;
+        manager.update_config(new_config.clone()).await?;
 
-        let updated_config = manager.get_config().await;
+        let updated_config = manager.get_config().await?;
         assert_eq!(updated_config.ui.language, "en-US");
 
         Ok(())

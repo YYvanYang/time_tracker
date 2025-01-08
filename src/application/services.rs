@@ -1,17 +1,31 @@
 use std::sync::Arc;
-use crate::core::{AppResult, error::AppError, traits::Storage, models::*};
+use crate::core::{AppResult, error::AppError, traits::Storage};
 use crate::infrastructure::config::Config;
-use chrono::{DateTime, Local};
+use crate::domain::config::ConfigManager;
 
-pub struct Services {
+pub struct ServiceContainer {
     pub storage: Arc<dyn Storage + Send + Sync>,
     pub config: Config,
+    pub config_manager: Arc<dyn ConfigManager + Send + Sync>,
 }
 
-#[async_trait::async_trait]
-pub trait ConfigManager: Send + Sync {
-    async fn save_config(&self, config: &Config) -> AppResult<()>;
-    async fn load_config(&self) -> AppResult<Config>;
+impl ServiceContainer {
+    pub fn new(
+        storage: Arc<dyn Storage + Send + Sync>,
+        config: Config,
+        config_manager: Arc<dyn ConfigManager + Send + Sync>,
+    ) -> Self {
+        Self {
+            storage,
+            config,
+            config_manager,
+        }
+    }
+
+    pub async fn update_config(&mut self, config: Config) -> AppResult<()> {
+        self.config = config;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -19,28 +33,4 @@ pub trait WindowManager: Send + Sync {
     async fn show(&self) -> AppResult<()>;
     async fn hide(&self) -> AppResult<()>;
     async fn is_visible(&self) -> AppResult<bool>;
-}
-
-impl Services {
-    pub fn new(
-        storage: Arc<dyn Storage + Send + Sync>,
-        config: Config,
-    ) -> Self {
-        Self {
-            storage,
-            config,
-        }
-    }
-
-    pub async fn update_config(&self, config: Config) -> AppResult<()> {
-        self.config_manager.save_config(&config).await
-    }
-
-    pub async fn save_state(&self) -> AppResult<()> {
-        self.config_manager.save_config(&self.config).await
-    }
-
-    pub async fn cleanup(&self) -> AppResult<()> {
-        self.save_state().await
-    }
 } 

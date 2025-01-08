@@ -5,18 +5,23 @@ pub use models::*;
 pub use queries::*;
 
 use crate::core::{AppError, AppResult};
+use crate::domain::config::AppConfig;
+use crate::core::models::{Activity, Project, PomodoroSession};
 use sqlx::{
     sqlite::{SqlitePool, SqlitePoolOptions},
-    Pool, Sqlite,
+    Pool, Sqlite, Row,
 };
 use std::path::Path;
 use tokio::sync::OnceCell;
+use async_trait::async_trait;
+use crate::core::traits::Storage;
+use chrono::{DateTime, Local};
 
-pub struct Storage {
+pub struct SqliteStorage {
     pool: Pool<Sqlite>,
 }
 
-impl Storage {
+impl SqliteStorage {
     pub async fn new(database_path: impl AsRef<Path>) -> AppResult<Self> {
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -59,54 +64,232 @@ impl Storage {
         tx.commit().await?;
         Ok(result)
     }
-
-    pub async fn get_app_usage_records(
-        &self,
-        start: chrono::DateTime<chrono::Local>,
-        end: chrono::DateTime<chrono::Local>,
-    ) -> AppResult<Vec<AppUsageRecord>> {
-        queries::get_app_usage_records(&self.pool, start, end).await
-    }
-
-    pub async fn get_pomodoro_records(
-        &self,
-        start: chrono::DateTime<chrono::Local>,
-        end: chrono::DateTime<chrono::Local>,
-    ) -> AppResult<Vec<PomodoroRecord>> {
-        queries::get_pomodoro_records(&self.pool, start, end).await
-    }
-
-    pub async fn insert_app_usage(&self, record: &AppUsageRecord) -> AppResult<i64> {
-        queries::insert_app_usage(&self.pool, record).await
-    }
-
-    pub async fn insert_pomodoro(&self, record: &PomodoroRecord) -> AppResult<i64> {
-        queries::insert_pomodoro(&self.pool, record).await
-    }
-
-    pub async fn get_statistics(
-        &self,
-        start: chrono::DateTime<chrono::Local>,
-        end: chrono::DateTime<chrono::Local>,
-    ) -> AppResult<Vec<(String, String)>> {
-        queries::get_statistics(&self.pool, start, end).await
-    }
 }
 
-static INSTANCE: OnceCell<Storage> = OnceCell::const_new();
-
-impl Storage {
-    pub async fn initialize(database_path: impl AsRef<Path>) -> AppResult<()> {
-        let storage = Self::new(database_path).await?;
-        INSTANCE.set(storage).map_err(|_| {
-            AppError::Storage("Storage has already been initialized".into())
-        })?;
+#[async_trait]
+impl Storage for SqliteStorage {
+    async fn initialize(&self) -> AppResult<()> {
         Ok(())
     }
 
-    pub fn instance() -> AppResult<&'static Storage> {
-        INSTANCE.get().ok_or_else(|| {
-            AppError::Storage("Storage has not been initialized".into())
-        })
+    async fn get_config(&self) -> AppResult<Option<AppConfig>> {
+        let result = sqlx::query("SELECT * FROM config WHERE id = 1")
+            .fetch_optional(&self.pool)
+            .await?;
+
+        match result {
+            Some(row) => {
+                let data: String = row.get("data");
+                let config: AppConfig = serde_json::from_str(&data)?;
+                Ok(Some(config))
+            }
+            None => Ok(None),
+        }
     }
+
+    async fn save_config(&self, config: &AppConfig) -> AppResult<()> {
+        let data = serde_json::to_string(config)?;
+        sqlx::query(
+            r#"
+            INSERT INTO config (id, data) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET data = excluded.data
+            "#,
+        )
+        .bind(&data)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn save_activity(&self, activity: &Activity) -> AppResult<i64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO activities (
+                title, description, start_time, end_time, project_id, category_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&activity.title)
+        .bind(&activity.description)
+        .bind(&activity.start_time)
+        .bind(&activity.end_time)
+        .bind(&activity.project_id)
+        .bind(&activity.category_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn get_activity(&self, id: i64) -> AppResult<Activity> {
+        let activity = sqlx::query_as::<_, Activity>(
+            r#"
+            SELECT * FROM activities WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(activity)
+    }
+
+    async fn list_activities(&self) -> AppResult<Vec<Activity>> {
+        let activities = sqlx::query_as::<_, Activity>(
+            r#"
+            SELECT * FROM activities ORDER BY start_time DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(activities)
+    }
+
+    async fn get_activities(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>> {
+        let activities = sqlx::query_as::<_, Activity>(
+            r#"
+            SELECT * FROM activities 
+            WHERE start_time >= ? AND end_time <= ?
+            ORDER BY start_time DESC
+            "#,
+        )
+        .bind(start)
+        .bind(end)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(activities)
+    }
+
+    async fn get_project_activities(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<Activity>> {
+        let activities = sqlx::query_as::<_, Activity>(
+            r#"
+            SELECT * FROM activities 
+            WHERE project_id = ? AND start_time >= ? AND end_time <= ?
+            ORDER BY start_time DESC
+            "#,
+        )
+        .bind(project_id)
+        .bind(start)
+        .bind(end)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(activities)
+    }
+
+    async fn save_project(&self, project: &Project) -> AppResult<i64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO projects (
+                name, description, color, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&project.name)
+        .bind(&project.description)
+        .bind(&project.color)
+        .bind(&project.created_at)
+        .bind(&project.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn get_project(&self, id: i64) -> AppResult<Project> {
+        let project = sqlx::query_as::<_, Project>(
+            r#"
+            SELECT * FROM projects WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(project)
+    }
+
+    async fn list_projects(&self) -> AppResult<Vec<Project>> {
+        let projects = sqlx::query_as::<_, Project>(
+            r#"
+            SELECT * FROM projects ORDER BY name
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(projects)
+    }
+
+    async fn save_pomodoro(&self, pomodoro: &PomodoroSession) -> AppResult<i64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO pomodoro_sessions (
+                start_time, end_time, duration, status, project_id
+            ) VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&pomodoro.start_time)
+        .bind(&pomodoro.end_time)
+        .bind(&pomodoro.duration)
+        .bind(&pomodoro.status)
+        .bind(&pomodoro.project_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    async fn get_pomodoro(&self, id: i64) -> AppResult<PomodoroSession> {
+        let session = sqlx::query_as::<_, PomodoroSession>(
+            r#"
+            SELECT * FROM pomodoro_sessions WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(session)
+    }
+
+    async fn list_pomodoros(&self) -> AppResult<Vec<PomodoroSession>> {
+        let sessions = sqlx::query_as::<_, PomodoroSession>(
+            r#"
+            SELECT * FROM pomodoro_sessions ORDER BY start_time DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(sessions)
+    }
+
+    async fn get_pomodoro_sessions(&self, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>> {
+        let sessions = sqlx::query_as::<_, PomodoroSession>(
+            r#"
+            SELECT * FROM pomodoro_sessions 
+            WHERE start_time >= ? AND end_time <= ?
+            ORDER BY start_time DESC
+            "#,
+        )
+        .bind(start)
+        .bind(end)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(sessions)
+    }
+
+    async fn get_project_pomodoro_sessions(&self, project_id: i64, start: DateTime<Local>, end: DateTime<Local>) -> AppResult<Vec<PomodoroSession>> {
+        let sessions = sqlx::query_as::<_, PomodoroSession>(
+            r#"
+            SELECT * FROM pomodoro_sessions 
+            WHERE project_id = ? AND start_time >= ? AND end_time <= ?
+            ORDER BY start_time DESC
+            "#,
+        )
+        .bind(project_id)
+        .bind(start)
+        .bind(end)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(sessions)
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct ConfigRow {
+    id: i64,
+    data: String,
 }

@@ -1,10 +1,15 @@
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use tokio::sync::broadcast;
 use crate::core::AppResult;
 use crate::plugins::loader::PluginLoader;
 use crate::plugins::traits::Plugin;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use tokio::sync::broadcast;
+
+pub enum PluginEvent {
+    Loaded(String),
+    Unloaded(String),
+    Error(String),
+}
 
 pub struct PluginRegistry {
     plugins: RwLock<HashMap<String, Arc<dyn Plugin>>>,
@@ -12,32 +17,19 @@ pub struct PluginRegistry {
     event_sender: broadcast::Sender<PluginEvent>,
 }
 
-#[derive(Debug, Clone)]
-pub enum PluginEvent {
-    Loaded(String),
-    Unloaded(String),
-    Reloaded(String),
-    Error(String),
-}
-
 impl PluginRegistry {
-    pub fn new(plugin_dir: PathBuf) -> Self {
-        let (tx, _) = broadcast::channel(100);
+    pub fn new(event_sender: broadcast::Sender<PluginEvent>) -> Self {
         Self {
             plugins: RwLock::new(HashMap::new()),
-            loader: RwLock::new(PluginLoader::new(plugin_dir)),
-            event_sender: tx,
+            loader: RwLock::new(PluginLoader::new()),
+            event_sender,
         }
-    }
-
-    pub fn subscribe(&self) -> broadcast::Receiver<PluginEvent> {
-        self.event_sender.subscribe()
     }
 
     pub async fn load_plugin(&self, plugin_name: &str) -> AppResult<()> {
         let plugin = {
             let mut loader = self.loader.write().unwrap();
-            loader.load_plugin(plugin_name).await?
+            loader.load_plugin(plugin_name)?
         };
 
         {
@@ -60,7 +52,7 @@ impl PluginRegistry {
 
         {
             let mut loader = self.loader.write().unwrap();
-            loader.unload_plugin(plugin_name).await?;
+            loader.unload_plugin(plugin_name)?;
         }
 
         self.event_sender
@@ -71,27 +63,28 @@ impl PluginRegistry {
     }
 
     pub async fn reload_plugin(&self, plugin_name: &str) -> AppResult<()> {
-        let plugin = {
-            let mut loader = self.loader.write().unwrap();
-            loader.reload_plugin(plugin_name).await?
-        };
-
-        {
-            let mut plugins = self.plugins.write().unwrap();
-            plugins.insert(plugin_name.to_string(), plugin);
-        }
-
-        self.event_sender
-            .send(PluginEvent::Reloaded(plugin_name.to_string()))
-            .unwrap_or_default();
-
+        self.unload_plugin(plugin_name).await?;
+        self.load_plugin(plugin_name).await?;
         Ok(())
     }
 
-    pub async fn scan_and_load_plugins(&self) -> AppResult<()> {
+    pub async fn get_plugin(&self, plugin_name: &str) -> Option<Arc<dyn Plugin>> {
+        let plugins = self.plugins.read().unwrap();
+        plugins.get(plugin_name).cloned()
+    }
+
+    pub async fn get_plugins(&self) -> Vec<(String, Arc<dyn Plugin>)> {
+        let plugins = self.plugins.read().unwrap();
+        plugins
+            .iter()
+            .map(|(name, plugin)| (name.clone(), plugin.clone()))
+            .collect()
+    }
+
+    pub async fn load_plugins(&self) -> AppResult<()> {
         let plugin_names = {
             let loader = self.loader.read().unwrap();
-            loader.scan_plugins().await?
+            loader.list_plugins()?
         };
 
         for name in plugin_names {
@@ -105,24 +98,20 @@ impl PluginRegistry {
         Ok(())
     }
 
-    pub fn list_plugins(&self) -> Vec<Arc<dyn Plugin>> {
-        let plugins = self.plugins.read().unwrap();
-        plugins.values().cloned().collect()
-    }
+    pub async fn unload_plugins(&self) -> AppResult<()> {
+        let plugin_names: Vec<String> = {
+            let plugins = self.plugins.read().unwrap();
+            plugins.keys().cloned().collect()
+        };
 
-    pub async fn start_all(&self) -> AppResult<()> {
-        let plugins = self.plugins.read().unwrap();
-        for plugin in plugins.values() {
-            plugin.start().await?;
+        for name in plugin_names {
+            if let Err(e) = self.unload_plugin(&name).await {
+                self.event_sender
+                    .send(PluginEvent::Error(format!("卸载插件 {} 失败: {}", name, e)))
+                    .unwrap_or_default();
+            }
         }
-        Ok(())
-    }
 
-    pub async fn stop_all(&self) -> AppResult<()> {
-        let plugins = self.plugins.read().unwrap();
-        for plugin in plugins.values() {
-            plugin.stop().await?;
-        }
         Ok(())
     }
 } 

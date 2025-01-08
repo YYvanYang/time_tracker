@@ -19,8 +19,18 @@ impl DialogContext {
 }
 
 pub trait Dialog {
+    fn title(&self) -> String;
     fn view(&self) -> Element<Message>;
     fn update(&mut self, message: Message);
+    fn show(&mut self) {
+        // 默认实现
+    }
+    fn hide(&mut self) {
+        // 默认实现
+    }
+    fn is_visible(&self) -> bool {
+        false
+    }
 }
 
 pub struct DialogContainer<'a> {

@@ -1,6 +1,8 @@
+use std::fmt;
 use thiserror::Error;
+use sqlx::migrate::MigrateError;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum AppError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -8,55 +10,39 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
-    #[error("Resource not found: {0}")]
-    NotFound(String),
-
-    #[error("CSV error: {0}")]
-    Csv(#[from] csv::Error),
-
-    #[error("CSV writer error: {0}")]
-    CsvWriter(#[from] csv::IntoInnerError<csv::Writer<Vec<u8>>>),
+    #[error("Migration error: {0}")]
+    Migration(#[from] MigrateError),
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("UTF-8 error: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
+    #[error("CSV error: {0}")]
+    Csv(#[from] csv::Error),
 
     #[error("Plugin error: {0}")]
-    Plugin(#[from] libloading::Error),
-
-    #[error("GUI error: {0}")]
-    Gui(#[from] eframe::Error),
-
-    #[error("Notification error: {0}")]
-    Notification(#[from] notify_rust::error::Error),
-
-    #[error("Platform error: {0}")]
-    Platform(String),
+    Plugin(String),
 
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 
-    #[error("Storage error: {0}")]
-    Storage(String),
+    #[error("Not found: {0}")]
+    NotFound(String),
 
-    #[error("Validation error: {0}")]
-    Validation(String),
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    #[error("System error: {0}")]
+    System(String),
 }
 
-pub type AppResult<T> = Result<T, AppError>;
-
-impl From<tray_item::TIError> for AppError {
-    fn from(err: tray_item::TIError) -> Self {
-        Self::Platform(err.to_string())
+impl From<String> for AppError {
+    fn from(s: String) -> Self {
+        AppError::System(s)
     }
 }
 
-pub struct NotFoundError(pub String);
-
-impl From<NotFoundError> for AppError {
-    fn from(err: NotFoundError) -> Self {
-        Self::NotFound(err.0)
+impl From<&str> for AppError {
+    fn from(s: &str) -> Self {
+        AppError::System(s.to_string())
     }
 } 

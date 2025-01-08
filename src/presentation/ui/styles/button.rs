@@ -1,105 +1,146 @@
-use iced::{
-    widget::button,
-    Background, Color, Theme, Vector,
-};
+use iced::widget::button;
+use iced::Color;
 
-pub fn primary() -> button::Appearance {
-    button::Appearance {
-        background: Some(Background::Color(Color::from_rgb(0.2, 0.5, 0.8))),
-        text_color: Color::WHITE,
-        ..Default::default()
+#[derive(Debug, Clone, Copy)]
+pub enum ButtonStyle {
+    Primary,
+    Secondary,
+}
+
+impl Default for ButtonStyle {
+    fn default() -> Self {
+        ButtonStyle::Primary
     }
 }
 
-pub fn warning() -> button::Appearance {
-    button::Appearance {
-        background: Some(Background::Color(Color::from_rgb(0.9, 0.6, 0.1))),
-        text_color: Color::WHITE,
-        ..Default::default()
+pub struct PrimaryButton;
+
+impl button::StyleSheet for PrimaryButton {
+    type Style = ButtonStyle;
+
+    fn active(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.2, 0.5, 0.8).into()),
+                border_radius: 4.0,
+                border_width: 1.0,
+                border_color: Color::from_rgb(0.1, 0.4, 0.7),
+                text_color: Color::WHITE,
+                ..Default::default()
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.8, 0.8, 0.8).into()),
+                border_radius: 4.0,
+                border_width: 1.0,
+                border_color: Color::from_rgb(0.7, 0.7, 0.7),
+                text_color: Color::BLACK,
+                ..Default::default()
+            },
+        }
+    }
+
+    fn hovered(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.3, 0.6, 0.9).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.9, 0.9, 0.9).into()),
+                ..self.active(style)
+            },
+        }
+    }
+
+    fn pressed(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.1, 0.4, 0.7).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.7, 0.7, 0.7).into()),
+                ..self.active(style)
+            },
+        }
+    }
+
+    fn disabled(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.5, 0.5, 0.5).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.8, 0.8, 0.8).into()),
+                ..self.active(style)
+            },
+        }
     }
 }
 
-pub fn danger() -> button::Appearance {
-    button::Appearance {
-        background: Some(Background::Color(Color::from_rgb(0.8, 0.2, 0.2))),
-        text_color: Color::WHITE,
-        ..Default::default()
-    }
-}
+pub struct DangerButton;
 
-pub fn active() -> Theme {
-    Theme::Custom(Box::new(Active))
-}
+impl button::StyleSheet for DangerButton {
+    type Style = ButtonStyle;
 
-pub struct Primary;
-pub struct Active;
-
-impl button::StyleSheet for Primary {
-    type Style = Theme;
-
-    fn active(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.11, 0.42, 0.87))),
-            border_radius: 4.0,
-            shadow_offset: Vector::new(0.0, 0.0),
-            text_color: Color::WHITE,
-            ..Default::default()
+    fn active(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.8, 0.2, 0.2).into()),
+                border_radius: 4.0,
+                border_width: 1.0,
+                border_color: Color::from_rgb(0.7, 0.1, 0.1),
+                text_color: Color::WHITE,
+                ..Default::default()
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.9, 0.3, 0.3).into()),
+                border_radius: 4.0,
+                border_width: 1.0,
+                border_color: Color::from_rgb(0.8, 0.2, 0.2),
+                text_color: Color::WHITE,
+                ..Default::default()
+            },
         }
     }
 
-    fn hovered(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.2, 0.5, 0.9))),
-            ..self.active()
+    fn hovered(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.9, 0.3, 0.3).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(1.0, 0.4, 0.4).into()),
+                ..self.active(style)
+            },
         }
     }
 
-    fn pressed(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.1, 0.35, 0.8))),
-            ..self.active()
+    fn pressed(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.7, 0.1, 0.1).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.8, 0.2, 0.2).into()),
+                ..self.active(style)
+            },
         }
     }
 
-    fn disabled(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.5, 0.5, 0.5))),
-            ..self.active()
-        }
-    }
-}
-
-impl button::StyleSheet for Active {
-    type Style = Theme;
-
-    fn active(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.2, 0.6, 0.9))),
-            border_radius: 4.0,
-            shadow_offset: Vector::new(0.0, 0.0),
-            text_color: Color::WHITE,
-            ..Default::default()
-        }
-    }
-
-    fn hovered(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.3, 0.7, 0.95))),
-            ..self.active()
-        }
-    }
-
-    fn pressed(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.15, 0.5, 0.85))),
-            ..self.active()
-        }
-    }
-
-    fn disabled(&self) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.5, 0.5, 0.5))),
-            ..self.active()
+    fn disabled(&self, style: &Self::Style) -> button::Appearance {
+        match style {
+            ButtonStyle::Primary => button::Appearance {
+                background: Some(Color::from_rgb(0.5, 0.5, 0.5).into()),
+                ..self.active(style)
+            },
+            ButtonStyle::Secondary => button::Appearance {
+                background: Some(Color::from_rgb(0.6, 0.6, 0.6).into()),
+                ..self.active(style)
+            },
         }
     }
 } 

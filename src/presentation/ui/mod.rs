@@ -1,41 +1,154 @@
 use std::sync::Arc;
 use iced::{
     widget::{Button, Column, Container, Row, Text},
-    Element, Length, Sandbox, Settings, Theme,
+    Element, Length, Theme,
 };
-use crate::core::{AppResult, models::*};
-use crate::infrastructure::{
-    config::Config,
-    storage::Storage,
-};
-use crate::domain::{
-    ActivityManager,
-    ProjectManager,
-    PomodoroManager,
-    AnalysisManager,
-    ExportManager,
-};
+use crate::core::{AppResult, traits::Storage};
+use crate::infrastructure::config::Config;
 
-mod components;
-mod dialogs;
-mod styles;
-mod views;
+pub mod components;
+pub mod dialogs;
+pub mod styles;
+pub mod views;
 
 pub use components::*;
 pub use dialogs::*;
 pub use styles::*;
 pub use views::*;
 
+#[derive(Debug, Clone)]
+pub enum Message {
+    NoOp,
+    Exit,
+    ToggleWindow,
+    ShowSettings,
+    ShowAbout,
+    ShowHelp,
+    ShowExport,
+    ShowImport,
+    ShowBackup,
+    ShowRestore,
+    ShowPlugins,
+    ShowLogs,
+    ShowStats,
+    ShowProjects,
+    ShowTasks,
+    ShowTimer,
+    ShowCalendar,
+    ShowReports,
+    ShowNotifications,
+    ShowUpdates,
+    ShowFeedback,
+    ShowBugs,
+    ShowDonate,
+    ShowLicense,
+    ShowPrivacy,
+    ShowTerms,
+    ShowChangelog,
+    ShowRoadmap,
+    ShowContribute,
+    ShowSponsors,
+    ShowCommunity,
+    ShowBlog,
+    ShowDocs,
+    ShowApi,
+    ShowStatus,
+    ShowMetrics,
+    ShowHealth,
+    ShowBackups,
+    ShowLogs2,
+    ShowStats2,
+    ShowProjects2,
+    ShowTasks2,
+    ShowTimer2,
+    ShowCalendar2,
+    ShowReports2,
+    ShowNotifications2,
+    ShowUpdates2,
+    ShowFeedback2,
+    ShowBugs2,
+    ShowDonate2,
+    ShowLicense2,
+    ShowPrivacy2,
+    ShowTerms2,
+    ShowChangelog2,
+    ShowRoadmap2,
+    ShowContribute2,
+    ShowSponsors2,
+    ShowCommunity2,
+    ShowBlog2,
+    ShowDocs2,
+    ShowApi2,
+    ShowStatus2,
+    ShowMetrics2,
+    ShowHealth2,
+    ShowBackups2,
+}
+
 pub struct TimeTrackerApp {
-    config: Config,
     storage: Arc<dyn Storage + Send + Sync>,
-    activity_manager: Arc<ActivityManager>,
-    project_manager: Arc<ProjectManager>,
-    pomodoro_manager: Arc<PomodoroManager>,
-    analysis_manager: Arc<AnalysisManager>,
-    export_manager: Arc<ExportManager>,
-    current_view: View,
-    dialog: Option<Box<dyn Dialog>>,
+    config: Config,
+    state: State,
+}
+
+impl TimeTrackerApp {
+    pub fn new(storage: Arc<dyn Storage + Send + Sync>, config: Config) -> Self {
+        Self {
+            storage,
+            config,
+            state: State::default(),
+        }
+    }
+
+    pub fn view(&self) -> Element<Message> {
+        let content = match self.state.current_view {
+            View::Overview => self.overview_view(),
+            View::Projects => self.projects_view(),
+            View::Pomodoro => self.pomodoro_view(),
+            View::Settings => self.settings_view(),
+            View::Statistics => self.statistics_view(),
+        };
+
+        Container::new(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn overview_view(&self) -> Element<Message> {
+        Column::new()
+            .push(Text::new("概览").size(24))
+            .spacing(20)
+            .into()
+    }
+
+    fn projects_view(&self) -> Element<Message> {
+        Column::new()
+            .push(Text::new("项目").size(24))
+            .spacing(20)
+            .into()
+    }
+
+    fn pomodoro_view(&self) -> Element<Message> {
+        Column::new()
+            .push(Text::new("番茄钟").size(24))
+            .spacing(20)
+            .into()
+    }
+
+    fn settings_view(&self) -> Element<Message> {
+        Column::new()
+            .push(Text::new("设置").size(24))
+            .spacing(20)
+            .into()
+    }
+
+    fn statistics_view(&self) -> Element<Message> {
+        Column::new()
+            .push(Text::new("统计").size(24))
+            .spacing(20)
+            .into()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,109 +156,19 @@ pub enum View {
     Overview,
     Projects,
     Pomodoro,
-    Statistics,
     Settings,
-}
-
-pub trait Dialog {
-    fn view(&self) -> Element<Message>;
-    fn update(&mut self, message: Message) -> DialogResult;
+    Statistics,
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
-    NoOp,
-    ViewChanged(View),
-    DialogClosed(DialogResult),
-    // Add more messages as needed
+pub struct State {
+    current_view: View,
 }
 
-pub enum DialogResult {
-    None,
-    Close,
-    // Add more results as needed
-}
-
-impl TimeTrackerApp {
-    pub fn new(
-        config: Config,
-        storage: Arc<dyn Storage + Send + Sync>,
-        activity_manager: Arc<ActivityManager>,
-        project_manager: Arc<ProjectManager>,
-        pomodoro_manager: Arc<PomodoroManager>,
-        analysis_manager: Arc<AnalysisManager>,
-        export_manager: Arc<ExportManager>,
-    ) -> Self {
+impl Default for State {
+    fn default() -> Self {
         Self {
-            config,
-            storage,
-            activity_manager,
-            project_manager,
-            pomodoro_manager,
-            analysis_manager,
-            export_manager,
             current_view: View::Overview,
-            dialog: None,
         }
-    }
-
-    pub fn run() -> AppResult<()> {
-        let settings = Settings::default();
-        Ok(())
-    }
-
-    fn view(&self) -> Element<Message> {
-        let content = match self.current_view {
-            View::Overview => views::overview::view(),
-            View::Projects => views::projects::view(),
-            View::Pomodoro => views::pomodoro::view(),
-            View::Statistics => views::statistics::view(),
-            View::Settings => views::settings::view(),
-        };
-
-        let dialog = if let Some(dialog) = &self.dialog {
-            dialog.view()
-        } else {
-            Container::new(Column::new()).into()
-        };
-
-        Container::new(
-            Column::new()
-                .push(self.view_navigation())
-                .push(content)
-                .push(dialog)
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-    }
-
-    fn view_navigation(&self) -> Element<Message> {
-        let mut row = Row::new().spacing(20);
-
-        for &view in &[View::Overview, View::Projects, View::Pomodoro, View::Statistics, View::Settings] {
-            let label = match view {
-                View::Overview => "Overview",
-                View::Projects => "Projects",
-                View::Pomodoro => "Pomodoro",
-                View::Statistics => "Statistics",
-                View::Settings => "Settings",
-            };
-
-            let button = Button::new(Text::new(label))
-                .on_press(Message::ViewChanged(view))
-                .style(if view == self.current_view {
-                    styles::button::active()
-                } else {
-                    styles::button::primary()
-                });
-
-            row = row.push(button);
-        }
-
-        Container::new(row)
-            .width(Length::Fill)
-            .style(styles::container::header())
-            .into()
     }
 }

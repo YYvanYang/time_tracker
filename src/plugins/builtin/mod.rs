@@ -1,7 +1,7 @@
-mod system_notification;
-mod csv_export;
 mod backup;
+mod stats;
+mod notification;
 
-pub use system_notification::SystemNotificationPlugin;
-pub use csv_export::CsvExportPlugin;
-pub use backup::FileBackupPlugin; 
+pub use backup::BackupPlugin;
+pub use stats::StatsPlugin;
+pub use notification::NotificationPlugin; 

@@ -2,10 +2,15 @@ use async_trait::async_trait;
 use crate::core::models::*;
 use crate::core::error::AppResult;
 use chrono::{DateTime, Local};
+use crate::domain::config::AppConfig;
 
 #[async_trait]
 pub trait Storage: Send + Sync {
     async fn initialize(&self) -> AppResult<()>;
+    
+    // 配置相关
+    async fn get_config(&self) -> AppResult<Option<AppConfig>>;
+    async fn save_config(&self, config: &AppConfig) -> AppResult<()>;
     
     // 活动相关
     async fn save_activity(&self, activity: &Activity) -> AppResult<i64>;

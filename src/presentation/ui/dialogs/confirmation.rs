@@ -1,45 +1,73 @@
-use super::base::{Dialog, DialogContext};
-use crate::error::Result;
-use crate::ui::TimeTrackerApp;
-use eframe::egui;
+use iced::{widget::{button, text, Column, Row}, Element, Length};
+use crate::presentation::ui::dialogs::base::Dialog;
+use crate::presentation::ui::Message;
+use crate::presentation::ui::styles::button::{ButtonStyle, PrimaryButton, DangerButton};
 
 pub struct ConfirmationDialog {
-    pub title: String,
-    pub message: String,
-    pub on_confirm: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()> + Send>>,
-    pub on_cancel: Option<Box<dyn FnOnce(&mut TimeTrackerApp) -> Result<()> + Send>>,
+    title: String,
+    message: String,
+    visible: bool,
+    on_confirm: Box<dyn Fn() -> Message>,
+    on_cancel: Box<dyn Fn() -> Message>,
+}
+
+impl ConfirmationDialog {
+    pub fn new<F1, F2>(title: String, message: String, on_confirm: F1, on_cancel: F2) -> Self
+    where
+        F1: Fn() -> Message + 'static,
+        F2: Fn() -> Message + 'static,
+    {
+        Self {
+            title,
+            message,
+            visible: false,
+            on_confirm: Box::new(on_confirm),
+            on_cancel: Box::new(on_cancel),
+        }
+    }
 }
 
 impl Dialog for ConfirmationDialog {
-    fn show(&mut self, ctx: &egui::Context, dialog_ctx: &mut DialogContext) -> bool {
-        let mut is_open = true;
-        
-        egui::Window::new(&self.title)
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut is_open)
-            .show(ctx, |ui| {
-                ui.label(&self.message);
-                ui.horizontal(|ui| {
-                    if ui.button("确认").clicked() {
-                        if let Some(on_confirm) = self.on_confirm.take() {
-                            if let Err(e) = on_confirm(dialog_ctx.app) {
-                                dialog_ctx.show_error(e.to_string());
-                            }
-                        }
-                        dialog_ctx.pop_dialog();
-                    }
-                    if ui.button("取消").clicked() {
-                        if let Some(on_cancel) = self.on_cancel.take() {
-                            if let Err(e) = on_cancel(dialog_ctx.app) {
-                                dialog_ctx.show_error(e.to_string());
-                            }
-                        }
-                        dialog_ctx.pop_dialog();
-                    }
-                });
-            });
+    fn title(&self) -> String {
+        self.title.clone()
+    }
 
-        is_open
+    fn view(&self) -> Element<Message> {
+        let content = Column::new()
+            .spacing(20)
+            .width(Length::Fill)
+            .push(text(&self.message))
+            .push(
+                Row::new()
+                    .spacing(10)
+                    .push(
+                        button("取消")
+                            .style(ButtonStyle::Secondary)
+                            .on_press((self.on_cancel)()),
+                    )
+                    .push(
+                        button("确认")
+                            .style(ButtonStyle::Primary)
+                            .on_press((self.on_confirm)()),
+                    ),
+            );
+
+        content.into()
+    }
+
+    fn update(&mut self, message: Message) {
+        // 处理消息
+    }
+
+    fn show(&mut self) {
+        self.visible = true;
+    }
+
+    fn hide(&mut self) {
+        self.visible = false;
+    }
+
+    fn is_visible(&self) -> bool {
+        self.visible
     }
 } 

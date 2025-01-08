@@ -1,0 +1,6 @@
+-- 创建配置表
+CREATE TABLE IF NOT EXISTS config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    data TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+); 
